@@ -90,7 +90,7 @@ The work is committed before each submission into a review.
 
 - [x] 3.1 Verify: `make gate` is green, and `make tla-big` reports no
       violation.
-- [ ] 3.2 End to end, by hand: a scratch run in a clone with a local bare
+- [x] 3.2 End to end, by hand: a scratch run in a clone with a local bare
       remote and a fake `gh`. Drive it with `refine` and the agent tools
       through every gate to `archived`. Verify: the pushes, the PR calls, the
       archived OpenSpec change, a trace verdict of pass, and nothing left in
