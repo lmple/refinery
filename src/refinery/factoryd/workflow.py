@@ -209,22 +209,11 @@ class Workflow:
     # Tools
 
     async def start_workflow(self, who: Principal, change: str, root: str) -> Json:
-        """Human: StartRun on ``change`` from configured root ``root``."""
+        """Human: StartRun on ``change`` from configured root ``root``, in the
+        run's worktree (run-worktrees); returns run id, phase and worktree."""
         _require(who, Role.HUMAN, "start_workflow")
-        worktree = self._root(root)
-        await self._check_branch(worktree)
-        outcome = await self.store.start_run(
-            change, worktree, TransitionRequest(Action.START_RUN, RunRole.HUMAN, _now())
-        )
-        if isinstance(outcome, Refused):
-            raise WorkflowError(outcome.reason)
-        issued = self.tokens.create(Role.AGENT, run_id=outcome.record.run_id)
-        return {
-            "run_id": outcome.record.run_id,
-            "phase": outcome.record.phase.value,
-            "agent_token": issued.secret,
-            "token_id": issued.token.id,
-        }
+        self._root(root)
+        raise NotImplementedError("start in the run's worktree (runner D1)")
 
     async def get_task(self, who: Principal) -> Json:
         """Agent: phase, whose turn, what to do, frozen paths, gates and progress."""
