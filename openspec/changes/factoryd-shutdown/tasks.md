@@ -23,8 +23,9 @@ reason given.
       has no `Traceback` and has one line saying how many requests were
       cut off. Verify: it fails today.
 - [ ] 1.4 In the config tests: `REFINERY_SHUTDOWN_TIMEOUT` sets
-      `ServerConfig.shutdown_timeout_s`, which defaults to 5. Verify: it
-      fails (no such field).
+      `ServerConfig.shutdown_timeout_s`, which defaults to 5. A skeleton
+      field (default 5, the variable not read yet) keeps pyright clean.
+      Verify: it fails on the variable.
 
 ## 2. Implementation
 

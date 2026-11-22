@@ -23,6 +23,7 @@ class ServerConfig:
     run_spec: Path | None = None
     gate: GateConfig = field(default_factory=GateConfig)
     tools: Tools = field(default_factory=Tools)  # git, gh, openspec
+    shutdown_timeout_s: float = 5.0  # skeleton: REFINERY_SHUTDOWN_TIMEOUT not read yet
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "ServerConfig":
