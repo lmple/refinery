@@ -1,19 +1,21 @@
 {
   "approved": {
-    "spec": null,
+    "spec": "99caf6f6d53fb510fc9fa10067fe4414a912b4cf",
     "tests": null
   },
   "change": "factoryd-shutdown",
-  "frozen": [],
-  "phase": "spec_review",
+  "frozen": [
+    "spec"
+  ],
+  "phase": "tests_review",
   "run_id": "factoryd-shutdown.1",
   "schema": 1,
-  "seq": 3,
+  "seq": 5,
   "started_at": "2026-11-22T21:44:38.466679+00:00",
   "trace": {
     "events": null,
     "sha256": null,
     "verdict": "none"
   },
-  "updated_at": "2026-11-22T21:49:10.229456+00:00"
+  "updated_at": "2026-11-22T21:55:38.072183+00:00"
 }
