@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from refinery.gate.runner import GateConfig
+from refinery.review.repo import Tools
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8740
@@ -21,6 +22,7 @@ class ServerConfig:
     tla_jar: Path | None = None
     run_spec: Path | None = None
     gate: GateConfig = field(default_factory=GateConfig)
+    tools: Tools = field(default_factory=Tools)  # git, gh, openspec
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "ServerConfig":

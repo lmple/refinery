@@ -9,9 +9,12 @@ from starlette.routing import Mount
 from refinery.factoryd.config import ServerConfig
 from refinery.factoryd.mcp import build_mcp
 from refinery.factoryd.workflow import Workflow
+from refinery.run.archive import TraceValidator
 
 
-def create_app(config: ServerConfig) -> Starlette:
+def create_app(
+    config: ServerConfig, *, validator: TraceValidator | None = None
+) -> Starlette:
     """The app; ``app.state.workflow`` is the Workflow while it runs."""
     opened: dict[str, Workflow] = {}
 

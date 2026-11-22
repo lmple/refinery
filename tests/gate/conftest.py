@@ -17,6 +17,7 @@ from tests.run.helpers import HAPPY_PATH, accepted, request, run_async
 A = Action
 CHANGE = "demo"
 RUN = "demo.1"
+BRANCH = "change/demo"
 
 MAKEFILE = """\
 BEHAVIOUR_DIR ?= /nonexistent
@@ -54,7 +55,8 @@ def make_repo(root: Path) -> str:
     root.mkdir()
     for rel, text in {
         "Makefile": MAKEFILE,
-        ".gitignore": "__pycache__/\n.refinery/\n",
+        # .refinery/ is not ignored: factoryd commits the run record (review-queue).
+        ".gitignore": "__pycache__/\n",
         "spec/Model.tla": "---- MODULE Model ----\n====\n",
         "openspec/specs/cap/spec.md": "# cap\n",
         f"openspec/changes/{CHANGE}/specs/cap/spec.md": "# delta\n",
@@ -68,6 +70,8 @@ def make_repo(root: Path) -> str:
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "initial")
+    # Runs refuse the default branch (review-queue): work on a change branch.
+    git(root, "checkout", "-q", "-b", BRANCH)
     return git(root, "rev-parse", "HEAD")
 
 

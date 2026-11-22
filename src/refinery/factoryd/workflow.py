@@ -21,6 +21,7 @@ from refinery.factoryd.progress import append_progress, read_progress
 from refinery.gate.frozen import frozen_paths
 from refinery.gate.runner import GateRunner
 from refinery.proc.supervisor import Supervisor
+from refinery.run.archive import TraceValidator
 from refinery.run.model import (
     TERMINAL,
     Action,
@@ -101,7 +102,9 @@ class Workflow:
         self._gate_tasks: dict[str, asyncio.Task[None]] = {}
 
     @classmethod
-    async def open(cls, config: ServerConfig) -> Self:
+    async def open(
+        cls, config: ServerConfig, *, validator: TraceValidator | None = None
+    ) -> Self:
         """Startup: reap orphans, recover runs, schedule gates of runs in verify."""
         supervisor = Supervisor(config.data_dir)
         reaped = supervisor.reap()
@@ -137,6 +140,10 @@ class Workflow:
             if record is None or record.phase in TERMINAL:
                 return None
         return Principal(token.id, token.role, token.run_id)
+
+    async def wait_idle(self) -> None:
+        """Wait until every gate run and archive sequence has finished."""
+        raise NotImplementedError
 
     async def wait_for_gates(self) -> None:
         """Wait until every scheduled gate run has finished (tests, shutdown)."""

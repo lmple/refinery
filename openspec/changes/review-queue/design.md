@@ -214,6 +214,21 @@ Planted bugs checked:
 | PR marked ready in `archive` | `ReadyOnlyWhenArchived` |
 | submitting with uncommitted work | `ReviewsAreOfCommits` |
 
+### D10. Shutdown diagnostics
+
+During this change's own run, `refinery serve` hung on Ctrl-C. Repeated
+Ctrl-C and SIGTERM were ignored, and only SIGKILL stopped it. That points to
+a blocked event loop rather than a slow graceful shutdown, but it could not
+be reproduced: an open MCP session and a held streaming GET both shut down
+within a second.
+
+Rather than guess at a fix, `refinery serve` registers
+`faulthandler.register(SIGUSR1, all_threads=True)`. Next time,
+`kill -USR1 <pid>` writes every thread's stack to factoryd's stderr without
+stopping it. `tests/factoryd/test_shutdown.py` guards both cases: SIGINT with
+an MCP session open exits promptly, and SIGUSR1 dumps stacks while factoryd
+keeps serving.
+
 ## Risks / Trade-offs
 
 - **[factoryd now pushes with your git credentials and calls `gh`]** → Only

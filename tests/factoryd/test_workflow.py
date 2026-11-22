@@ -2,6 +2,7 @@
 service, with Principals standing in for verified tokens."""
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -19,6 +20,7 @@ from tests.factoryd.conftest import (
     to_phase,
 )
 from tests.gate.conftest import CHANGE
+from tests.run.helpers import request
 
 A = Action
 P = Phase
@@ -391,5 +393,71 @@ def test_progress_cannot_be_written(fx: Factory) -> None:
         assert result["warning"]
         assert wf.store.events(run_id) == before
         assert wf.store.get(run_id).phase is P.SPEC
+
+    fx.run(scenario)
+
+
+# review-queue: the agent sees the human's last decision (agent-tools), and
+# every review is of a commit (review-queue).
+
+
+def test_last_decision_before_any(fx: Factory) -> None:
+    async def scenario(wf: Workflow) -> None:
+        _, agent = await start(wf, fx)
+        task = await wf.get_task(agent)
+        assert task["last_decision"] is None
+        assert task["pr"] is None
+
+    fx.run(scenario)
+
+
+def test_last_decision_after_a_rejection(fx: Factory) -> None:
+    async def scenario(wf: Workflow) -> None:
+        run_id, agent = await start(wf, fx)
+        await to_phase(wf, fx, run_id, agent, P.SPEC_REVIEW)
+        rejection = request(A.REJECT_SPEC, note="scenario 2 has no THEN")
+        await wf.store.transition(run_id, rejection)
+        task = await wf.get_task(agent)
+        assert task["phase"] == "spec"
+        assert isinstance(task["last_decision"], dict)
+        decision = cast(dict[str, object], task["last_decision"])
+        assert decision["action"] == "RejectSpec"
+        assert decision["note"] == "scenario 2 has no THEN"
+        assert decision["at"]
+
+    fx.run(scenario)
+
+
+def test_submit_with_uncommitted_work(fx: Factory) -> None:
+    async def scenario(wf: Workflow) -> None:
+        run_id, agent = await start(wf, fx)
+        await to_phase(wf, fx, run_id, agent, P.TESTS)
+        (fx.root / "tests" / "test_new.py").write_text("def test_new() -> None: ...\n")
+        with pytest.raises(WorkflowError, match=r"tests/test_new\.py"):
+            await wf.submit_for_review(agent)
+        assert wf.store.get(run_id).phase is P.TESTS
+
+    fx.run(scenario)
+
+
+def test_the_run_record_does_not_count(fx: Factory) -> None:
+    async def scenario(wf: Workflow) -> None:
+        run_id, agent = await start(wf, fx)
+        await wf.submit_for_review(agent)  # spec -> model
+        record = fx.root / ".refinery" / "runs" / f"{run_id}.json"
+        assert record.exists()
+        assert (await wf.submit_for_review(agent))["phase"] == "spec_review"
+
+    fx.run(scenario)
+
+
+def test_handing_the_spec_to_the_model_phase_needs_no_commit(fx: Factory) -> None:
+    async def scenario(wf: Workflow) -> None:
+        run_id, agent = await start(wf, fx)
+        (fx.root / "openspec" / "changes" / "demo" / "proposal.md").write_text(
+            "draft\n"
+        )
+        assert (await wf.submit_for_review(agent))["phase"] == "model"
+        assert wf.store.get(run_id).phase is P.MODEL
 
     fx.run(scenario)

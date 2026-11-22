@@ -10,7 +10,7 @@ The work is committed before each submission into a review.
 
 ## 1. Tests (written failing; frozen after the tests review gate)
 
-- [ ] 1.0 Write the API skeleton, with new behaviour raising
+- [x] 1.0 Write the API skeleton, with new behaviour raising
       `NotImplementedError`:
       - `refinery.review` (`Review`, `ReviewError`, `git` helpers, `publish`,
         `archive_sequence`);
@@ -19,7 +19,7 @@ The work is committed before each submission into a review.
       - the `refine` console script.
 
       Verify: `uv run pyright` is clean.
-- [ ] 1.1 In `tests/review/test_decisions.py`, write the review-queue
+- [x] 1.1 In `tests/review/test_decisions.py`, write the review-queue
       scenarios against `Review`:
       - decisions per gate, with notes;
       - the reviewed commit is `HEAD`;
@@ -28,7 +28,7 @@ The work is committed before each submission into a review.
       - the queue contents.
 
       Verify: they fail with `NotImplementedError`.
-- [ ] 1.2 In `tests/review/test_publish.py`, write the publishing scenarios
+- [x] 1.2 In `tests/review/test_publish.py`, write the publishing scenarios
       against a bare git remote:
       - record commit and push;
       - PR create and reuse, with a scripted fake `gh` on `PATH`;
@@ -36,7 +36,7 @@ The work is committed before each submission into a review.
       - starting on `main` or a detached HEAD is refused.
 
       Verify: they fail with `NotImplementedError`.
-- [ ] 1.3 In `tests/review/test_archive.py`, write the archive-sequence
+- [x] 1.3 In `tests/review/test_archive.py`, write the archive-sequence
       scenarios:
       - the full sequence, with a fake `openspec` that moves the change
         directory;
@@ -45,24 +45,24 @@ The work is committed before each submission into a review.
       - trace failure then retry.
 
       Verify: they fail with `NotImplementedError`.
-- [ ] 1.4 In `tests/factoryd/test_api.py`, write the human-api scenarios over
+- [x] 1.4 In `tests/review/test_api.py`, write the human-api scenarios over
       real HTTP:
       - 401 and 403;
       - each resource;
       - error status codes and bodies.
 
       Verify: they fail with `NotImplementedError`.
-- [ ] 1.5 In `tests/cli/test_refine.py`, write the `refine` scenarios against
+- [x] 1.5 In `tests/review/test_refine.py`, write the `refine` scenarios against
       a served factoryd: approve, a refused reject, a missing token, and
       `runs --waiting`. Verify: they fail with `NotImplementedError`.
-- [ ] 1.6 Extend `tests/factoryd/test_workflow.py` with:
+- [x] 1.6 Extend `tests/factoryd/test_workflow.py` with:
       - `last_decision` and `pr` in `get_task`;
       - submission refused with uncommitted work;
       - the record file doesn't count as uncommitted.
 
       Update existing workflow tests that relied on supplying commits
       (approvals now go through `Review`). Verify: the new tests fail.
-- [ ] 1.7 Run `uv run pytest -q`: every new test fails for the stated reason,
+- [x] 1.7 Run `uv run pytest -q`: every new test fails for the stated reason,
       all others pass, and nothing errors in collection. Commit, then submit
       for the tests review.
 
@@ -81,6 +81,10 @@ The work is committed before each submission into a review.
 - [ ] 2.6 Implement the `refine` CLI (D8). Verify: 1.5 passes.
 - [ ] 2.7 Update `docs/vision.md`: the change order (`review-queue` before
       `runner`) and the MVP review text. Verify: it matches this change.
+- [ ] 2.8 Shutdown diagnostics: `refinery serve` registers faulthandler on
+      SIGUSR1 (D10). Verify: `tests/factoryd/test_shutdown.py` passes. Its
+      SIGINT test is a regression guard and already passes; the SIGUSR1 test
+      fails before this task.
 
 ## 3. Verify
 
