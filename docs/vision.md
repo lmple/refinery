@@ -94,14 +94,18 @@ In scope:
 - **Gates.** `run_gate` runs the same checks as `make gate`, via the single
   subprocess wrapper, and records every result as an event.
 - **Review.** The run's GitHub PR is where I read the spec delta, the TLA+
-  delta and the diff. factoryd pushes the branch and opens the PR at the first
-  review gate, and pushes again before each later one. I record each decision with `refine approve` or
-  `refine reject` with a note. `submit_for_review` returns the decision and,
-  on rejection, the note; `get_task` also includes the latest note, so an
-  agent that restarted still sees it.
-- **Approve to merge.** Final approval archives the OpenSpec change and
-  commits and pushes it on the run's branch. GitHub Actions runs `make gate`,
-  and I merge the PR on GitHub.
+  delta and the diff. At every review gate factoryd commits the run record,
+  pushes the branch and, the first time, opens a draft PR; a failed push is
+  recorded and the gate stays reviewable locally. I record each decision with
+  `refine approve` or `refine reject --note`. An approval is of the commit
+  factoryd published, and is refused if the worktree has uncommitted changes
+  or newer commits. `submit_for_review` returns at once; `get_task` shows the
+  latest decision and note, so an agent that restarted still sees it.
+- **Approve to merge.** Final approval archives the OpenSpec change, validates
+  the event log against `spec/Run.tla`, commits and pushes the final record,
+  and marks the PR ready. A failed step stops the sequence in place, and
+  `refine retry-archive` resumes it. GitHub Actions runs `make gate`, and I
+  merge the PR on GitHub.
 - **Run record** (decided in `run-lifecycle`):
   - **Record:** each run has `.refinery/runs/<run-id>.json`, committed on its
     branch. That's one file per run, so runs never conflict, and main keeps
@@ -134,16 +138,17 @@ In order; each builds on the one before it.
    role-scoped tokens and server-side phase enforcement. From here on, every
    Refinery change goes through these tools (AGENTS.md, Bootstrap note); until
    the runner exists, the agent is launched by hand.
-4. **`runner`.** `spec/Runner.tla` models job claiming, runner crash and
+4. **`review-queue`.** Publishing review gates (commit, push, draft PR), the
+   review queue, approve/reject/cancel/resolve with the approved commit
+   recorded, the resumable archive sequence, `get_task` showing the latest
+   decision, and the `refine` CLI over a human HTTP API. It comes before the
+   runner so that the runner change is itself reviewed through it.
+5. **`runner`.** `spec/Runner.tla` models job claiming, runner crash and
    restart, and cancellation, with invariants such as "a job is held by at
    most one runner" and "a cancelled run leaves no agent running".
    Implementation: the local runner pulls jobs from factoryd, creates the
    worktree and branch, and launches Claude Code headless or in tmux through
-   the subprocess wrapper.
-5. **`review-queue`.** `submit_for_review` returning the decision and note,
-   `get_task` including the latest note, the review queue, approve/reject, and
-   the `refine` CLI for start, status, review, approve and reject. Completes
-   the MVP.
+   the subprocess wrapper. Completes the MVP.
 
 After the MVP, the **web UI** comes first: run list, live events (SSE), the
 review queue, and starting and cancelling runs from the browser.
