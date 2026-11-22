@@ -1,0 +1,30 @@
+[project]
+name = "refinery"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "lmple", email = "llievre@protonmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.165.0",
+    "mcp>=2.3.0",
+    "typer>=0.29.2",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+refinery = "refinery:main"
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.17",
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]
