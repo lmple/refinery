@@ -105,6 +105,14 @@ others go back to the human.
 - Every module has a matching `.cfg`. A module that is only imported by others
   must instead contain the line `\* refinery: helper`; otherwise `make tla`
   fails.
+- Reachability checks live in `spec/<M>_reach.cfg`: each listed invariant
+  (named `Never<Behaviour>`) negates a behaviour that must be reachable.
+  `make tla` runs TLC once per invariant and fails unless every one is
+  violated. One run per witness is needed because TLC reports only the first
+  violated invariant per state.
+- The same model checked with different constants (for example several runs
+  competing) gets its own module that only `EXTENDS` the main one, with its own
+  `.cfg`, so each configuration stays small.
 - Terminal states (e.g. a finished or failed run) get an explicit stuttering
   step, a disjunct of `Next` such as `Done == state \in Terminal /\ UNCHANGED
   vars`, so TLC's deadlock check stays on and reports only genuine deadlocks.
@@ -136,19 +144,22 @@ others go back to the human.
 uv run pytest -q                     # tests
 uv run pyright                       # types (strict)
 uv run ruff check && uv run ruff format --check
-make tla                             # SANY + TLC on all spec/*.tla
+make tla                             # SANY + TLC + reachability on spec/*.tla
 make gate                            # everything above, in order
+make tla-big                         # occasional deep checks (*_big.cfg)
 ```
 
-`make tla` runs, per spec:
+`make tla` (via `scripts/tla.sh`) runs, per spec, from inside `spec/` so that
+`EXTENDS` resolves:
 
 ```sh
-java -cp tools/tla2tools.jar tla2sany.SANY spec/<M>.tla
-java -jar tools/tla2tools.jar -workers auto -config spec/<M>.cfg spec/<M>.tla
+java -cp ../tools/tla2tools.jar tla2sany.SANY <M>.tla
+java -jar ../tools/tla2tools.jar -workers auto -config <M>.cfg <M>.tla
+# and, per invariant in <M>_reach.cfg, a TLC run that must report it violated
 ```
 
 (PlusCal: translate first with
-`java -cp tools/tla2tools.jar pcal.trans spec/<M>.tla`.)
+`java -cp ../tools/tla2tools.jar pcal.trans <M>.tla`, from `spec/`.)
 
 ## Commits
 

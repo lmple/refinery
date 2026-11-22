@@ -102,9 +102,15 @@ In scope:
 - **Approve to merge.** Final approval archives the OpenSpec change and
   commits and pushes it on the run's branch. GitHub Actions runs `make gate`,
   and I merge the PR on GitHub.
-- **Run record.** Direction: a committed `.refinery/run.json` on the run's
-  branch, plus a gitignored `.refinery/events.jsonl` as the local, fail-open
-  event log. The final decision is made in `run-lifecycle`.
+- **Run record** (decided in `run-lifecycle`):
+  - **Record:** each run has `.refinery/runs/<run-id>.json`, committed on its
+    branch. That's one file per run, so runs never conflict, and main keeps
+    every finished run.
+  - **Event log:** `events.jsonl` lives in factoryd's data directory, outside
+    git, and is sealed at archive. Each transition appends its event before
+    rewriting the record, and a failed append refuses the transition.
+  - **At archive:** the record stores the trace-validation verdict, the
+    event count and the log's sha256.
 
 Out of scope for the MVP: the web UI, rendered TLA+ state graphs, merge queue,
 runners on more than one machine, other adapters, other spec plugins
@@ -117,8 +123,8 @@ In order; each builds on the one before it.
 1. **`run-lifecycle`.** `spec/Run.tla` defines the run state machine: phases,
    review gates and terminal states, with `TypeOK`, phase-ordering invariants
    and reachability checks. Implementation: runs, stages and events in SQLite
-   (WAL), rebuildable from the run record (`.refinery/run.json` and
-   `.refinery/events.jsonl`, finalised here); one function per TLA+ action;
+   (WAL), rebuildable from the run records and event logs; one function per
+   TLA+ action;
    event names equal to action names; a trace-validation test that replays an
    event log against the spec.
 2. **`gate-runner`.** The single subprocess wrapper (timeout, cancellation,
