@@ -11,7 +11,7 @@ The work is committed before each submission into a review.
 
 ## 1. Tests (written failing; frozen after the tests review gate)
 
-- [ ] 1.0 Write the skeleton, with new behaviour raising
+- [x] 1.0 Write the skeleton, with new behaviour raising
       `NotImplementedError`:
       - `refinery.jobs` (job log, `state` fold, claim, finish, release,
         retry);
@@ -22,7 +22,7 @@ The work is committed before each submission into a review.
       - `refinery runner`.
 
       Verify: `uv run pyright` is clean.
-- [ ] 1.1 In `tests/jobs/test_state.py`, write unit tests and hypothesis
+- [x] 1.1 In `tests/jobs/test_state.py`, write unit tests and hypothesis
       properties over the fold, mirroring `Runner.tla`'s invariants:
       - at most one open job;
       - progress isn't a failure;
@@ -34,7 +34,7 @@ The work is committed before each submission into a review.
         attempts.
 
       Verify: they fail with `NotImplementedError`.
-- [ ] 1.2 In `tests/jobs/test_claims.py`, write the claim scenarios against a
+- [x] 1.2 In `tests/jobs/test_claims.py`, write the claim scenarios against a
       real `TokenStore` and `RunStore`:
       - claim, serialised claims, a 503 that revokes the token;
       - a lost claim response reconciled by the next claim;
@@ -44,16 +44,16 @@ The work is committed before each submission into a review.
       - poll answers.
 
       Verify: they fail.
-- [ ] 1.3 In `tests/review/test_worktrees.py`, write the run-worktrees
+- [x] 1.3 In `tests/review/test_worktrees.py`, write the run-worktrees
       scenarios against a temporary repo and a bare remote: first run, reuse
       after a cancel, an existing branch, a branch checked out in the root, a
       path taken, no git call when the change is already running, the jar
       symlink with a clean status, and discovery after a restart. Verify:
       they fail.
-- [ ] 1.4 In `tests/factoryd/test_runner_api.py`, write the runner API over
+- [x] 1.4 In `tests/factoryd/test_runner_api.py`, write the runner API over
       real HTTP: 401 and 403 per token role, each route, and job ids that
       belong to another runner. Verify: they fail.
-- [ ] 1.5 In `tests/runner/test_runner.py`, write the runner scenarios
+- [x] 1.5 In `tests/runner/test_runner.py`, write the runner scenarios
       against a served factoryd and a fake `claude` script that records its
       argv, environment, working directory and the MCP file's mode:
       - launch, one job at a time;
@@ -65,9 +65,9 @@ The work is committed before each submission into a review.
       - no token.
 
       Verify: they fail.
-- [ ] 1.6 In `tests/adapters/test_claude_code.py`, write the argv defaults and
+- [x] 1.6 In `tests/adapters/test_claude_code.py`, write the argv defaults and
       optional flags. Verify: they fail.
-- [ ] 1.7 Update the existing tests:
+- [x] 1.7 Update the existing tests:
       - `tests/factoryd/test_workflow.py`, `tests/review/test_api.py` and
         `tests/review/test_refine.py`: start takes a root and returns no
         token; tests that used the start token get one from a claim;
@@ -76,7 +76,7 @@ The work is committed before each submission into a review.
       - `tests/auth/test_tokens.py`: the runner role.
 
       Verify: the new or changed tests fail for the stated reason.
-- [ ] 1.8 Run `uv run pytest -q`: every new test fails for the stated reason,
+- [x] 1.8 Run `uv run pytest -q`: every new test fails for the stated reason,
       all others pass, and nothing errors in collection. Commit, then submit
       for the tests review.
 
