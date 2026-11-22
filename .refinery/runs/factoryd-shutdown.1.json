@@ -8,15 +8,15 @@
     "spec",
     "tests"
   ],
-  "phase": "final_review",
+  "phase": "archived",
   "run_id": "factoryd-shutdown.1",
   "schema": 1,
-  "seq": 8,
+  "seq": 10,
   "started_at": "2026-11-22T21:44:38.466679+00:00",
   "trace": {
-    "events": null,
-    "sha256": null,
-    "verdict": "none"
+    "events": 10,
+    "sha256": "846d16ee57d7f5663b0d7060a00899602a84e449e44f1c0d24374924f73905f0",
+    "verdict": "pass"
   },
-  "updated_at": "2026-11-22T22:03:28.934031+00:00"
+  "updated_at": "2026-11-22T22:10:05.640435+00:00"
 }
