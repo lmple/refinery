@@ -1,7 +1,9 @@
 """The ``refinery`` admin command: serve, and manage tokens."""
 
 import dataclasses
+import faulthandler
 import os
+import signal
 from pathlib import Path
 from typing import Annotated
 
@@ -49,6 +51,9 @@ def serve(
         host=host or config.host,
         port=port or config.port,
     )
+    # Diagnostics: `kill -USR1 <pid>` dumps every thread's stack to stderr,
+    # for a hang like the one seen during the review-queue run (D10).
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     if not config.roots:
         typer.echo(
             "refinery serve needs at least one --root (or REFINERY_ROOTS)", err=True

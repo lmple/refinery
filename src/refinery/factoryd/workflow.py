@@ -3,7 +3,9 @@
 ``spec/Workflow.tla`` models it: agent tools need a live run-bound token
 (AgentNeedsLiveToken), submit from impl schedules the gate and is refused
 during a dry run (GateAndDryRunExclusive), and startup reschedules the gate of
-every run in verify (VerifyResolves).
+every run in verify (VerifyResolves). ``spec/Review.tla`` adds the review
+gates: submissions need a clean worktree (ReviewsAreOfCommits), every gate is
+published (GatesGetPublished), and archives resume (ArchiveCompletes).
 """
 
 import asyncio
@@ -11,6 +13,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+from collections.abc import Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Self, cast
@@ -21,6 +24,9 @@ from refinery.factoryd.progress import append_progress, read_progress
 from refinery.gate.frozen import frozen_paths
 from refinery.gate.runner import GateRunner
 from refinery.proc.supervisor import Supervisor
+from refinery.review.publish import PublishState, archive_sequence, publish, read_state
+from refinery.review.repo import GitError, Repo
+from refinery.run.archive import TraceValidator
 from refinery.run.model import (
     TERMINAL,
     Action,
@@ -30,12 +36,16 @@ from refinery.run.model import (
     Refused,
     RunRecord,
     TransitionRequest,
+    Verdict,
 )
 from refinery.run.model import Role as RunRole
 from refinery.run.store import RunStore
+from refinery.run.tlc import TlcTraceValidator
 from refinery.run.transitions import RULES
 
 type Json = dict[str, object]
+
+_FAIL = Verdict.FAIL
 
 _log = logging.getLogger(__name__)
 
@@ -76,6 +86,30 @@ _INSTRUCTIONS = {
 }
 _WAIT_FOR_REVIEW = "Waiting for the human's review. Call get_task later."
 
+# Phases where the human decides: entering one publishes the run (D3).
+GATES = frozenset(
+    {Phase.SPEC_REVIEW, Phase.TESTS_REVIEW, Phase.FINAL_REVIEW, Phase.ESCALATED}
+)
+# Submissions that lead into a review need a clean worktree (D2).
+_NEEDS_COMMIT = frozenset(
+    {
+        Action.COMPLETE_MODEL,
+        Action.SKIP_MODEL,
+        Action.COMPLETE_TESTS,
+        Action.COMPLETE_IMPL,
+    }
+)
+# The human's decisions, as reported in get_task's last_decision (D5).
+DECISIONS = frozenset(
+    {
+        Action.APPROVE_SPEC, Action.APPROVE_TESTS, Action.APPROVE_FINAL,
+        Action.REJECT_SPEC, Action.REJECT_TESTS, Action.REJECT_FINAL,
+        Action.RESOLVE_TO_SPEC, Action.RESOLVE_TO_TESTS, Action.RESOLVE_TO_IMPL,
+        Action.CANCEL,
+    }
+)  # fmt: skip
+_ARCHIVE_TIMEOUT_S = 600.0
+
 
 class WorkflowError(Exception):
     """A tool call that cannot be honoured; nothing changed."""
@@ -98,10 +132,14 @@ class Workflow:
         self.tokens = tokens
         self.supervisor = supervisor
         self.gates = gates
+        self.validator: TraceValidator | None = None  # None: TLC per run
         self._gate_tasks: dict[str, asyncio.Task[None]] = {}
+        self._background: dict[str, asyncio.Task[None]] = {}  # publish / archive
 
     @classmethod
-    async def open(cls, config: ServerConfig) -> Self:
+    async def open(
+        cls, config: ServerConfig, *, validator: TraceValidator | None = None
+    ) -> Self:
         """Startup: reap orphans, recover runs, schedule gates of runs in verify."""
         supervisor = Supervisor(config.data_dir)
         reaped = supervisor.reap()
@@ -113,15 +151,22 @@ class Workflow:
             gate_config = dataclasses.replace(gate_config, tla_jar=config.tla_jar)
         gates = GateRunner(store, supervisor, gate_config, config.data_dir)
         workflow = cls(config, store, TokenStore(config.data_dir), supervisor, gates)
+        workflow.validator = validator
         for record in store.runs():
+            state = read_state(config.data_dir, record.run_id)
             if record.phase is Phase.VERIFY:
                 workflow._schedule_gate(record.run_id)
+            elif record.phase in GATES:
+                # Review.tla Recover: a gate whose publishing was interrupted.
+                workflow._schedule(record.run_id, workflow.publish(record.run_id))
+            elif _resumable(record, state):
+                workflow.schedule_archive(record.run_id)
         await asyncio.sleep(0)  # let the scheduled gate runs register
         return workflow
 
     async def close(self) -> None:
         """Shutdown: cancel running gates (recording nothing), close the store."""
-        tasks = list(self._gate_tasks.values())
+        tasks = [*self._gate_tasks.values(), *self._background.values()]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -137,6 +182,16 @@ class Workflow:
             if record is None or record.phase in TERMINAL:
                 return None
         return Principal(token.id, token.role, token.run_id)
+
+    async def wait_idle(self) -> None:
+        """Wait until every gate run and archive sequence has finished."""
+        while self._gate_tasks or self._background:
+            await self.wait_for_gates()
+            if self._background:
+                await asyncio.wait(list(self._background.values()))
+                for key, task in list(self._background.items()):
+                    if task.done():
+                        del self._background[key]
 
     async def wait_for_gates(self) -> None:
         """Wait until every scheduled gate run has finished (tests, shutdown)."""
@@ -155,6 +210,7 @@ class Workflow:
         """Human: StartRun on ``change`` in ``worktree``; returns the agent token."""
         _require(who, Role.HUMAN, "start_workflow")
         root = self._root(worktree)
+        await self._check_branch(root)
         outcome = await self.store.start_run(
             change, root, TransitionRequest(Action.START_RUN, RunRole.HUMAN, _now())
         )
@@ -191,6 +247,8 @@ class Workflow:
             "gate": _latest(runs / "gates", "g"),
             "dry_run": _latest(runs / "dry-runs", "d"),
             "progress": read_progress(self.config.data_dir, record.run_id),
+            "last_decision": self.last_decision(record.run_id),
+            "pr": read_state(self.config.data_dir, record.run_id).pr,
         }
 
     async def submit_for_review(
@@ -211,12 +269,16 @@ class Workflow:
             raise WorkflowError(
                 "a dry run is in progress; wait for it before submitting"
             )
+        if name in _NEEDS_COMMIT:
+            await self._check_committed(record.run_id)
         request = TransitionRequest(
             name, RunRole.AGENT, _now(), reason=skip_model_reason
         )
         outcome = await self.store.transition(record.run_id, request)
         if isinstance(outcome, Refused):
             raise WorkflowError(outcome.reason)
+        if outcome.record.phase in GATES:
+            await self.publish(record.run_id)
         result: Json = {
             "run_id": record.run_id,
             "phase": outcome.record.phase.value,
@@ -242,6 +304,7 @@ class Workflow:
         outcome = await self.store.transition(record.run_id, request)
         if isinstance(outcome, Refused):
             raise WorkflowError(outcome.reason)
+        await self.publish(record.run_id)
         return {"run_id": record.run_id, "phase": outcome.record.phase.value}
 
     async def run_gate(self, who: Principal) -> Json:
@@ -273,6 +336,101 @@ class Workflow:
         if append_progress(self.config.data_dir, record.run_id, message, _now()):
             return {"recorded": True}
         return {"recorded": False, "warning": "the progress log could not be written"}
+
+    # Review support (used by Review, D3 to D6)
+
+    def repo(self, run_id: str) -> Repo:
+        """The run's worktree, driven through the supervisor."""
+        return Repo(
+            self.supervisor,
+            self.store.worktree(run_id),
+            self.config.tools,
+            self.config.gate.env,
+        )
+
+    async def publish(self, run_id: str) -> None:
+        """Publish the run's gate: commit the record, push, PR (fails open)."""
+        state = await publish(
+            self.repo(run_id), self.store, self.config.data_dir, run_id
+        )
+        if state.last_error:
+            _log.warning("publishing %s: %s", run_id, state.last_error)
+
+    def schedule_archive(self, run_id: str) -> None:
+        """Run (or resume) the archive sequence in the background."""
+        self._schedule(run_id, self._archive(run_id))
+
+    def last_decision(self, run_id: str) -> Json | None:
+        """The run's most recent human decision: action, note and time."""
+        for event in reversed(self.store.events(run_id)):
+            if event.name in DECISIONS:
+                return {
+                    "action": event.name.value,
+                    "note": event.note,
+                    "at": event.at.isoformat(),
+                }
+        return None
+
+    async def _archive(self, run_id: str) -> None:
+        result = await archive_sequence(
+            self.repo(run_id),
+            self.store,
+            self.config.data_dir,
+            run_id,
+            self._validator(run_id),
+            timeout_s=_ARCHIVE_TIMEOUT_S,
+        )
+        if not result.archived:
+            _log.warning(
+                "archive of %s stopped at %s: %s", run_id, result.step, result.error
+            )
+
+    def _validator(self, run_id: str) -> TraceValidator:
+        """The injected validator, else TLC against the configured (or the
+        worktree's) spec/Run.tla."""
+        if self.validator is not None:
+            return self.validator
+        worktree = self.store.worktree(run_id)
+        return TlcTraceValidator(
+            self.supervisor,
+            java="java",
+            jar=self.config.tla_jar or worktree / "tools" / "tla2tools.jar",
+            run_spec=self.config.run_spec or worktree / "spec" / "Run.tla",
+            work_dir=self.config.data_dir / "tmp",
+            timeout_s=_ARCHIVE_TIMEOUT_S / 2,
+        )
+
+    def _schedule(self, run_id: str, work: Coroutine[object, object, None]) -> None:
+        """One background publish or archive task per run at a time."""
+        if run_id in self._background and not self._background[run_id].done():
+            work.close()
+            return
+        self._background[run_id] = asyncio.create_task(work)
+
+    async def _check_branch(self, worktree: Path) -> None:
+        """Runs need a branch other than the default one (D6)."""
+        repo = Repo(self.supervisor, worktree, self.config.tools, self.config.gate.env)
+        try:
+            branch = await repo.branch()
+            default = await repo.default_branch()
+        except GitError as exc:
+            raise WorkflowError(f"cannot read the worktree's branch: {exc}") from exc
+        if branch is None:
+            raise WorkflowError(f"{worktree} is on a detached HEAD: check out a branch")
+        if branch == default:
+            raise WorkflowError(
+                f"{worktree} is on {branch}: runs need their own branch"
+            )
+
+    async def _check_committed(self, run_id: str) -> None:
+        """Every review is of a commit (D2); a git failure counts as dirty."""
+        try:
+            dirty = await self.repo(run_id).dirty_paths()
+        except GitError as exc:
+            raise WorkflowError(f"cannot check the worktree: {exc}") from exc
+        if dirty:
+            shown = ", ".join(dirty[:10]) + (" ..." if len(dirty) > 10 else "")
+            raise WorkflowError(f"commit your work first; uncommitted: {shown}")
 
     # Internals
 
@@ -310,12 +468,29 @@ class Workflow:
 
     async def _gate(self, run_id: str) -> None:
         outcome = await self.gates.run_gate(run_id)
+        record = self._record(run_id)
+        if record is not None and record.phase in GATES:  # PassGate: final_review
+            await self.publish(run_id)
         if isinstance(outcome, Refused):
             _log.warning("gate run for %s not started: %s", run_id, outcome.reason)
         elif outcome.transition is None:
             _log.info(
                 "gate run %s for %s stopped: run left verify", outcome.gate_id, run_id
             )
+
+
+def _resumable(record: RunRecord, state: PublishState) -> bool:
+    """An archive sequence that stopped without an error (a crash): resume it.
+
+    A run that stopped with an error waits for the human's retry-archive.
+    An archived run is resumed only if it was ever published, so runs from
+    before publishing existed are left alone.
+    """
+    if state.last_error is not None:
+        return False
+    if record.phase is Phase.ARCHIVE:
+        return record.trace.verdict is not _FAIL
+    return record.phase is Phase.ARCHIVED and bool(state.branch) and not state.finished
 
 
 def _require(who: Principal, role: Role, tool: str) -> None:

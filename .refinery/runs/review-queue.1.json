@@ -1,0 +1,22 @@
+{
+  "approved": {
+    "spec": "f34fa3ac373dcd337f599c541c191d869ebe96c2",
+    "tests": "e37ea91c162cd0e967924f6a28e15d916b258c6a"
+  },
+  "change": "review-queue",
+  "frozen": [
+    "spec",
+    "tests"
+  ],
+  "phase": "archived",
+  "run_id": "review-queue.1",
+  "schema": 1,
+  "seq": 10,
+  "started_at": "2026-11-22T20:32:43.654984+00:00",
+  "trace": {
+    "events": 10,
+    "sha256": "4defaafe995fcf7d248d997c09bdcc01444ce3d595fb44bb44c9cc69a70da928",
+    "verdict": "pass"
+  },
+  "updated_at": "2026-11-22T21:28:14.359346+00:00"
+}
