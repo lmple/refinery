@@ -108,6 +108,12 @@ def _report_cut_off_requests(record: logging.LogRecord) -> bool:
     return not (exc_type is not None and issubclass(exc_type, asyncio.CancelledError))
 
 
+@app.command()
+def runner() -> None:
+    """Run a runner: claim jobs from factoryd and launch agents."""
+    raise NotImplementedError("refinery runner (runner D6)")
+
+
 @token_app.command("create")
 def token_create(
     role: Annotated[

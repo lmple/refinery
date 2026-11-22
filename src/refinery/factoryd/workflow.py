@@ -23,6 +23,7 @@ from refinery.factoryd.config import ServerConfig
 from refinery.factoryd.progress import append_progress, read_progress
 from refinery.gate.frozen import frozen_paths
 from refinery.gate.runner import GateRunner
+from refinery.jobs.service import Jobs
 from refinery.proc.supervisor import Supervisor
 from refinery.review.publish import PublishState, archive_sequence, publish, read_state
 from refinery.review.repo import GitError, Repo
@@ -132,6 +133,7 @@ class Workflow:
         self.tokens = tokens
         self.supervisor = supervisor
         self.gates = gates
+        self.jobs = Jobs(store, tokens, config.data_dir, config.agent_attempts)
         self.validator: TraceValidator | None = None  # None: TLC per run
         self._gate_tasks: dict[str, asyncio.Task[None]] = {}
         self._background: dict[str, asyncio.Task[None]] = {}  # publish / archive
@@ -206,13 +208,13 @@ class Workflow:
 
     # Tools
 
-    async def start_workflow(self, who: Principal, change: str, worktree: str) -> Json:
-        """Human: StartRun on ``change`` in ``worktree``; returns the agent token."""
+    async def start_workflow(self, who: Principal, change: str, root: str) -> Json:
+        """Human: StartRun on ``change`` from configured root ``root``."""
         _require(who, Role.HUMAN, "start_workflow")
-        root = self._root(worktree)
-        await self._check_branch(root)
+        worktree = self._root(root)
+        await self._check_branch(worktree)
         outcome = await self.store.start_run(
-            change, root, TransitionRequest(Action.START_RUN, RunRole.HUMAN, _now())
+            change, worktree, TransitionRequest(Action.START_RUN, RunRole.HUMAN, _now())
         )
         if isinstance(outcome, Refused):
             raise WorkflowError(outcome.reason)

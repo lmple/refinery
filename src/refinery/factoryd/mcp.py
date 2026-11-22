@@ -52,9 +52,9 @@ def build_mcp(config: ServerConfig, workflow: Callable[[], Workflow]) -> MCPServ
         ),
     )
 
-    @server.tool(description="Human: start a run on an OpenSpec change in a worktree.")
-    async def start_workflow(change: str, worktree: str) -> Json:
-        return await _call(lambda who: workflow().start_workflow(who, change, worktree))
+    @server.tool(description="Human: start a run on an OpenSpec change from a root.")
+    async def start_workflow(change: str, root: str) -> Json:
+        return await _call(lambda who: workflow().start_workflow(who, change, root))
 
     @server.tool(
         description="Agent: your run's phase, whose turn it is, and what to do."

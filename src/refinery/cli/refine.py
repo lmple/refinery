@@ -63,13 +63,11 @@ def _phase_line(run: Json) -> str:
 @app.command()
 def start(
     change: str,
-    worktree: Annotated[
-        str, typer.Option(help="The run's worktree (a factoryd root).")
-    ] = ".",
+    root: Annotated[str, typer.Option(help="A factoryd root (the repo).")] = ".",
 ) -> None:
-    """Start a run on an OpenSpec change; prints the agent token once."""
+    """Start a run on an OpenSpec change."""
     started = _call(
-        "POST", "/runs", {"change": change, "worktree": str(Path(worktree).resolve())}
+        "POST", "/runs", {"change": change, "root": str(Path(root).resolve())}
     )
     typer.echo(_phase_line(started))
     typer.echo(f"agent token (shown once): {started['agent_token']}")
@@ -136,6 +134,12 @@ def resolve(
 ) -> None:
     """Resolve an escalation."""
     typer.echo(_phase_line(_call("POST", f"/runs/{run_id}/resolve", {"to": to})))
+
+
+@app.command()
+def retry(run_id: str) -> None:
+    """Re-queue a stuck run."""
+    typer.echo(_phase_line(_call("POST", f"/runs/{run_id}/retry")))
 
 
 @app.command("retry-archive")

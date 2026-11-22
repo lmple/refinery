@@ -21,7 +21,7 @@ class StartBody(BaseModel):
     """POST /api/runs."""
 
     change: str
-    worktree: str
+    root: str
 
 
 class ApproveBody(BaseModel):
@@ -93,7 +93,7 @@ def build_api(
     async def start_run(
         who: Annotated[Principal, Depends(human)], body: StartBody
     ) -> Json:
-        return await review().start(who, body.change, body.worktree)
+        return await review().start(who, body.change, body.root)
 
     @api.post("/runs/{run_id}/approve")
     async def approve(run_id: str, body: ApproveBody | None = None) -> Json:
@@ -114,5 +114,9 @@ def build_api(
     @api.post("/runs/{run_id}/retry-archive")
     async def retry_archive(run_id: str) -> Json:
         return await review().retry_archive(run_id)
+
+    @api.post("/runs/{run_id}/retry")
+    async def retry(run_id: str) -> Json:
+        return await review().retry(run_id)
 
     return api
