@@ -36,7 +36,8 @@ What exists:
 - **Removing worktrees** after a run ends. You do that with `git worktree
   remove` when you want to.
 - **Trace validation of the job log.** Its event names match `Runner.tla`'s
-  actions, so it can be added later.
+  actions (`Release` covers the model's `Hello`, `Shutdown` and claim
+  reconciliation), so it can be added later.
 
 ## Approaches
 
@@ -128,7 +129,7 @@ event fsynced. Its events match `Runner.tla`'s action names:
 |---|---|
 | `Claim` | `job`, `runner`, `token_id`, `claim_seq`, `at` |
 | `Finish` | `job`, `outcome` (supervisor `Outcome`), `exit_code`, `log`, `finish_seq`, `at` |
-| `Release` | `job`, `why` (`runner_restart`, `runner_shutdown`), `at` |
+| `Release` | `job`, `why` (`runner_restart`, `runner_shutdown`, `lost`), `at` |
 | `Retry` | `at` |
 
 The job id is `<run-id>.j<n>`, with n counting this run's claims. The state
@@ -154,8 +155,8 @@ only that attempts reset.
 **Released jobs aren't attempts.** A runner shutdown or crash isn't the
 agent's failure.
 
-**Jobs are released only by their runner,** through `finish`, `release` or
-`hello`. With no leases, factoryd never hands a run to a second runner
+**Jobs are released only by their runner,** through `finish`, `release`,
+`hello`, or a claim that doesn't list the job (D5). With no leases, factoryd never hands a run to a second runner
 while the first might still have an agent running. A runner that never comes
 back leaves its jobs open: the run shows "running" with a stale "runner last
 seen", and you can `refine cancel` it. That's acceptable with one machine.
@@ -170,7 +171,7 @@ Revoking the token stops the orphan's MCP calls, but not its file writes.
 | Route | Does |
 |---|---|
 | `POST hello` | Releases (`runner_restart`) every open job of this runner and revokes their agent tokens. The runner sends it after reaping. |
-| `POST claim` | 200 with a job, or 204. Under a single claim lock, picks the run that has wanted an agent longest (oldest last event, then run id). It issues an agent token for the run, revokes the run's other agent tokens, then appends `Claim`. If the append fails, the token is revoked and the answer is 503. |
+| `POST claim` | Body `{holding: [job ids]}`. 200 with a job, or 204. Under a single claim lock, it first releases (`lost`) this runner's open jobs not in `holding`. It then picks the run that has wanted an agent longest (oldest last event, then run id), issues an agent token for the run, revokes the run's other agent tokens, and appends `Claim`. If the append fails, the token is revoked and the answer is 503. |
 | `POST jobs/{job}/poll` | `{"action": "continue"}`, or `{"action": "stop", "why": ...}` when the run is terminal or not in an agent phase, or the job isn't open. It records the runner's last-seen time. |
 | `POST jobs/{job}/finish` | Body `{outcome, exit_code, log}`. Appends `Finish` and revokes the job's token. Idempotent: on a closed job it answers 200 and does nothing. |
 | `POST jobs/{job}/release` | Appends `Release(runner_shutdown)` and revokes the token. Idempotent. |
@@ -206,7 +207,9 @@ the runner's reap must never kill gates.
 loop.
 
 **Loop**, one `TaskGroup`. While fewer than `max_jobs` jobs run, it claims
-every claim interval. Each job runs in a task:
+every claim interval, one claim at a time, listing the ids of the jobs it is
+running. That list is how factoryd learns of a claim response the runner
+never got (D5); the model found the case (D9). Each job runs in a task:
 1. Write `jobs/<job>/mcp.json` with mode 0600, created that way rather than
    chmodded after: a server `refinery` with type `http`, the URL, and the
    `Authorization: Bearer` header.
@@ -273,51 +276,83 @@ goal 5), and the permission mode is a seatbelt, not the gate.
 
 ### D9. Model (`spec/Runner.tla`)
 
-**Constants:** `Runs` and `Runners`, two of each in `Runner.cfg`, and
-`MaxAttempts`. Small bounds cover crashes, turns and failures.
+**Abstraction.** Runs are coarsened from `Run.tla` to whose turn it is:
+`agent` (`spec`, `model`, `tests`, `impl`), `human` (every phase where the
+agent waits) or `ended`. The run's `seq` becomes the boolean `moved` ("the
+run moved since its job was claimed"), and the attempts become a counter
+that resets on any move. That matches D4, and keeps the state space finite
+without a step bound, so liveness is checked exactly.
 
-**State, per run:**
-- `turn`: `agent`, `human` or `ended`, with a bounded progress counter;
-- open job: none, or its holder;
-- agent: none, `running(x)` or `orphan(x)`, where x is the runner that
-  started it;
-- token: `live` or `revoked`;
-- failed attempts.
-
-**State, per runner:** `up` or `down`, and whether it has said hello since
-its last start.
+**State:**
+- factoryd: `turn`, `moved`, `job` (the holder or none), `tok`, `failures`;
+- the machine: `procs[r][x]`, the agent processes of runner x for run r.
+  They survive a runner crash;
+- each runner: `rstate` (`down`, `starting`, `reaped`, `ready`), and `lj`,
+  its memory of each job (`claimed`, `running`, `exited`), lost at a crash.
 
 **Actions:**
-- runner: `Hello` (after `Reap`), `Claim`, `Launch`, `AgentExit` (with or
-  without progress), `Poll`/`Stop`, `Finish`, `Release`;
-- environment: `RunnerCrash` (its agents become orphans), `RunnerRestart`;
-- agent: `Progress` (the run moves; it may leave the agent's turn);
-- human: `Cancel`, `Retry`, `Review` (`human` → `agent`).
+- runner: `Start`, `Reap`, `Hello`, `Claim` (`ClaimRun`, and `ClaimNone`,
+  which only reconciles), `Launch`, `Stop` (poll said stop: kill), `Finish`
+  and `Shutdown` (release best effort);
+- environment: `Crash`, a lost claim response, and `AgentExit` (also for
+  orphans);
+- agent: `Progress`, which needs a live token and its process; the run may
+  stay in the agent's turn (spec → model) or leave it;
+- human: `Review`, `End` (cancel or archive) and `Retry`.
+
+`MaxFaults` bounds crashes, shutdowns and lost responses together: a runner
+stopped for ever can't make progress.
 
 **Invariants:**
 - `TypeOK`;
-- `OneOpenJob`: a run has at most one open job, held by one runner;
-- `OneAgentPerRun`: at most one agent process, running or orphaned, per run;
-- `TokenOnlyForOpenJob`: a live agent token implies an open job of a run in
-  the agent's turn;
-- `NoClaimWhenStuck`;
-- `OrphansOnlyOfDownOrUnhelloedRunners`.
+- `OneAgentPerRun`;
+- `AgentsOnlyForOpenJobs`: an agent process exists only for its own runner's
+  open job;
+- `TokenOnlyForOpenJob`;
+- `StuckRunsHaveNoJob`;
+- `NoOrphansOnceReady`.
 
-**Liveness,** under weak fairness of the runner's own steps, justified in
-the module:
-- `CancelledRunsLoseTheirAgent`: `ended ~> no agent`;
-- `AgentTurnsGetAnAgentOrStuck`.
+**Liveness:** `CancelledRunsLoseTheirAgent` and
+`AgentTurnsGetAnAgentOrStuck`. They hold under weak fairness of the runner's
+own steps, per run for claims, since claims pick the oldest waiting run.
+That's justified in the module.
 
-**Reachability:**
+| Module and config | Scope | Distinct states |
+|---|---|---|
+| `Runner.cfg` | 1 run, 2 runners, 1 fault | 2,001 |
+| `RunnerRuns.cfg` (`EXTENDS Runner`) | 2 runs, 2 runners, 1 fault | 49,411 |
+| `Runner_big.cfg` | 1 run, 2 runners, 3 faults, 3 attempts | 10,699 |
+
+**Reachability witnesses** (`Runner_reach.cfg`, `RunnerRuns_reach.cfg`), each
+violated as required:
 - `NeverStuck`, `NeverRetried`, `NeverKilledByCancel`;
-- `NeverOrphanReaped` (a crash, a restart, the orphan killed, the run
-  claimed again);
-- `NeverTwoAgentsAtOnce` (two runs, two agents).
+- `NeverReclaimedAfterReap`, `NeverLostClaimReconciled`;
+- `NeverSameJobAcrossPhases` (one job carries the agent from `spec` into
+  `model`);
+- `NeverTwoAgentsAtOnce` (two runs).
 
-**Planted bugs to check:**
-- releasing the jobs of a crashed runner without a reap (the lease design);
-- claiming while stuck;
-- not revoking at `Finish`.
+**What TLC found while writing it:**
+1. **A lost claim response leaves the job open for ever.** The first model
+   had no reconciliation. A planted model without it deadlocks: a cancelled
+   run keeps an open job that nothing closes. This was a design gap, fixed by
+   `holding` in the claim (D5) and the agent-jobs requirement "Claims
+   reconcile the runner's jobs".
+2. **Unbounded shutdowns violate the agent-turn property.** The runner
+   restarts and stops for ever without claiming. This was a model bug, fixed
+   by counting shutdowns as faults.
+3. **Starvation.** With claim fairness only per runner, one run kept being
+   picked and the other never was. This was a model bug, fixed by fairness
+   per run, which is what oldest-first (D5) provides.
+
+**Planted bugs checked:**
+
+| Bug | Caught by |
+|---|---|
+| hello before reap | `AgentsOnlyForOpenJobs` |
+| leases: a down runner's job expires | `AgentsOnlyForOpenJobs` |
+| claim while stuck | `StuckRunsHaveNoJob` |
+| finish keeps the token | `TokenOnlyForOpenJob` |
+| no claim reconciliation | deadlock |
 
 ### D10. Bootstrap
 

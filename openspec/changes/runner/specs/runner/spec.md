@@ -74,7 +74,8 @@ The agent's environment SHALL NOT contain `REFINERY_RUNNER_TOKEN` or
 
 ### Requirement: Concurrent jobs are bounded
 The runner SHALL run at most `REFINERY_RUNNER_MAX_JOBS` jobs at once, and
-SHALL not claim while at that limit.
+SHALL not claim while at that limit. It SHALL make one claim call at a time,
+listing the ids of the jobs it is running.
 
 #### Scenario: One job at a time by default
 - **GIVEN** two runs wanting an agent, and a runner with default settings

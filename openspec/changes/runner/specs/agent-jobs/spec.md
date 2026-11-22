@@ -60,11 +60,9 @@ A job SHALL stay open until its own runner does one of these:
   and exit code);
 - releases it (`POST /api/runner/jobs/{job}/release`);
 - says hello (`POST /api/runner/hello`), which releases every open job of
-  that runner.
-
-Each of these SHALL revoke the job's agent token. A runner SHALL get 404 for
-another runner's job. Finishing or releasing a job that is already closed
-SHALL succeed and change nothing.
+  that runner;
+- claims without listing it among the jobs it holds (see "Claims reconcile
+  the runner's jobs").
 
 #### Scenario: Hello after a restart
 - **GIVEN** runner `x` holds open job `demo.1.j1` and restarts
@@ -75,6 +73,37 @@ SHALL succeed and change nothing.
 - **GIVEN** runner `x` holds open job `demo.1.j1` and has not called for an hour
 - **WHEN** runner `y` claims
 - **THEN** `y` does not get `demo.1`
+
+### Requirement: Closing a job revokes its token
+Every way a job closes SHALL revoke the job's agent token. A runner SHALL
+get 404 for another runner's job. Finishing or releasing a job that is
+already closed SHALL succeed and change nothing.
+
+#### Scenario: Finish twice
+- **GIVEN** job `demo.1.j1` was finished
+- **WHEN** its runner sends `finish` again
+- **THEN** the answer is 200, and the job log is unchanged
+
+#### Scenario: Another runner's job
+- **GIVEN** job `demo.1.j1` held by runner `x`
+- **WHEN** runner `y` sends `release` for it
+- **THEN** the answer is 404, and the job is still open
+
+### Requirement: Claims reconcile the runner's jobs
+Every claim SHALL carry the ids of the open jobs the runner is running. Before
+choosing a run, factoryd SHALL release, with reason `lost`, every open job of
+that runner not in the list: its claim was recorded, but the runner never got
+the response. This SHALL happen even when the claim then answers 204.
+
+#### Scenario: A claim response is lost
+- **GIVEN** factoryd recorded `Claim` of job `demo.1.j1` by runner `x`, but `x` never got the response
+- **WHEN** `x` claims again, listing no jobs
+- **THEN** the job log has `Release` of `demo.1.j1` with reason `lost`, its token no longer works, and `x` gets job `demo.1.j2` for `demo.1`
+
+#### Scenario: Jobs the runner lists stay open
+- **GIVEN** runner `x` is running job `a.1.j1`
+- **WHEN** `x` claims, listing `a.1.j1`
+- **THEN** `a.1.j1` is still open
 
 ### Requirement: Failed attempts and stuck runs
 A finish SHALL be a failed attempt when the run's `seq` at the finish equals

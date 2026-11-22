@@ -29,12 +29,15 @@ The work is committed before each submission into a review.
       - stuck after `MaxAttempts`;
       - releases aren't attempts;
       - `Retry` resets the attempts;
-      - no claim while stuck.
+      - no claim while stuck;
+      - claim reconciliation releases unlisted jobs as `lost`, never as
+        attempts.
 
       Verify: they fail with `NotImplementedError`.
 - [ ] 1.2 In `tests/jobs/test_claims.py`, write the claim scenarios against a
       real `TokenStore` and `RunStore`:
       - claim, serialised claims, a 503 that revokes the token;
+      - a lost claim response reconciled by the next claim;
       - finish, release and hello revoke tokens;
       - another runner's job is 404;
       - a silent runner keeps its job;
