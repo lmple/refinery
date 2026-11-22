@@ -106,6 +106,16 @@ def read_record(path: Path) -> RunRecord:
     return from_json(path.read_text(encoding="utf-8"))
 
 
+def worktrees_dir(root: Path) -> Path:
+    """The directory of the run worktrees factoryd creates for ``root``."""
+    return root.parent / f"{root.name}.worktrees"
+
+
+def search_roots(roots: Sequence[Path]) -> list[Path]:
+    """Each root, then each direct subdirectory of its worktrees directory."""
+    raise NotImplementedError("record discovery in worktrees (runner D2)")
+
+
 def find_records(roots: Sequence[Path]) -> dict[str, tuple[RunRecord, Path]]:
     """Every run record under ``roots``; of two copies, the higher seq wins."""
     found: dict[str, tuple[RunRecord, Path]] = {}

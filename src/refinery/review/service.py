@@ -104,10 +104,10 @@ class Review:
 
     # Acting
 
-    async def start(self, who: Principal, change: str, worktree: str) -> Json:
-        """Start a run (start_workflow); returns the agent token once."""
+    async def start(self, who: Principal, change: str, root: str) -> Json:
+        """Start a run (start_workflow) from a configured root."""
         try:
-            return await self.workflow.start_workflow(who, change, worktree)
+            return await self.workflow.start_workflow(who, change, root)
         except WorkflowError as exc:
             raise ReviewError(409, str(exc)) from exc
 
@@ -165,6 +165,10 @@ class Review:
             result = await self._transition(run_id, Action.RETRY_ARCHIVE)
         self.workflow.schedule_archive(run_id)
         return result
+
+    async def retry(self, run_id: str) -> Json:
+        """Re-queue a stuck run (agent-jobs, Retrying a stuck run)."""
+        raise NotImplementedError("retry a stuck run (runner D8)")
 
     # Internals
 

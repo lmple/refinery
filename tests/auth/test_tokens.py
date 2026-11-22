@@ -9,7 +9,7 @@ import pytest
 from refinery.auth.tokens import Principal, RefineryTokenVerifier, Role, TokenStore
 from tests.run.helpers import run_async
 
-TOKEN = re.compile(r"rft_([ha])_([0-9a-f]{8})_([A-Za-z0-9_-]{40,})")
+TOKEN = re.compile(r"rft_([har])_([0-9a-f]{8})_([A-Za-z0-9_-]{40,})")
 
 
 def test_human_token_format(tmp_path: Path) -> None:
@@ -38,6 +38,46 @@ def test_agent_token_needs_a_run_and_human_token_must_not_have_one(
         store.create(Role.AGENT)
     with pytest.raises(ValueError, match="run"):
         store.create(Role.HUMAN, run_id="demo.1")
+
+
+def test_runner_token_format(tmp_path: Path) -> None:
+    issued = TokenStore(tmp_path).create(Role.RUNNER)
+    match = TOKEN.fullmatch(issued.secret)
+    assert match, issued.secret
+    assert match.group(1) == "r"
+    assert (issued.token.role, issued.token.run_id) == (Role.RUNNER, None)
+    assert TokenStore(tmp_path).verify(issued.secret) == issued.token
+
+
+def test_runner_token_cannot_be_bound_to_a_run(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="run"):
+        TokenStore(tmp_path).create(Role.RUNNER, run_id="demo.1")
+
+
+def test_letters_cannot_be_swapped(tmp_path: Path) -> None:
+    store = TokenStore(tmp_path)
+    runner = store.create(Role.RUNNER)
+    assert store.verify(runner.secret.replace("rft_r_", "rft_h_", 1)) is None
+    human = store.create(Role.HUMAN)
+    assert store.verify(human.secret.replace("rft_h_", "rft_r_", 1)) is None
+
+
+def test_revoke_a_runs_agent_tokens(tmp_path: Path) -> None:
+    store = TokenStore(tmp_path)
+    old = store.create(Role.AGENT, run_id="demo.1")
+    older = store.create(Role.AGENT, run_id="demo.1")
+    kept = store.create(Role.AGENT, run_id="demo.1")
+    other_run = store.create(Role.AGENT, run_id="other.1")
+    human = store.create(Role.HUMAN)
+    revoked = store.revoke_run("demo.1", keep=kept.token.id)
+    assert sorted(revoked) == sorted([old.token.id, older.token.id])
+    assert store.verify(old.secret) is None
+    assert store.verify(older.secret) is None
+    assert store.verify(kept.secret) == kept.token
+    assert store.verify(other_run.secret) == other_run.token
+    assert store.verify(human.secret) == human.token
+    assert store.revoke_run("demo.1", keep=kept.token.id) == []
+    assert store.revoke_run("demo.1") == [kept.token.id]
 
 
 def test_verify_known_token(tmp_path: Path) -> None:

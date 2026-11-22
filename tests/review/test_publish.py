@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from refinery.factoryd.workflow import Workflow, WorkflowError
+from refinery.factoryd.workflow import Workflow
 from refinery.review.publish import publish_path, read_state
 from refinery.review.service import Review, ReviewError
 from refinery.run.model import Phase
@@ -115,38 +115,28 @@ def test_publishing_recovers_at_the_next_gate(rf: ReviewFactory) -> None:
     rf.run_review(scenario)
 
 
-# Requirement: Runs need a branch worktree
-
-
-def test_start_on_main(rf: ReviewFactory) -> None:
-    git(rf.root, "checkout", "-q", "main")
-
-    async def scenario(wf: Workflow, review: Review) -> None:
-        with pytest.raises(WorkflowError, match="main"):
-            await wf.start_workflow(HUMAN, CHANGE, str(rf.root))
-        with pytest.raises(ReviewError) as refused:
-            await review.start(HUMAN, CHANGE, str(rf.root))
-        assert refused.value.status == 409
-        assert wf.store.runs() == []
-
-    rf.run_review(scenario)
-
-
-def test_start_on_a_detached_head(rf: ReviewFactory) -> None:
-    git(rf.root, "checkout", "-q", "--detach")
-
-    async def scenario(wf: Workflow, review: Review) -> None:
-        with pytest.raises(WorkflowError):
-            await wf.start_workflow(HUMAN, CHANGE, str(rf.root))
-        assert wf.store.runs() == []
-
-    rf.run_review(scenario)
+# Requirement: Runs need a branch worktree. Its scenarios ("Start on main",
+# "Start on a detached HEAD", "Publishing pushes the run's branch") are in
+# test_worktrees.py, with the worktree factoryd creates (runner).
 
 
 def test_start_through_review(rf: ReviewFactory) -> None:
+    git(rf.root, "checkout", "-q", "main")  # runs start from the main checkout
+
     async def scenario(wf: Workflow, review: Review) -> None:
         started_run = await review.start(HUMAN, CHANGE, str(rf.root))
         assert (started_run["run_id"], started_run["phase"]) == ("demo.1", "spec")
-        assert str(started_run["agent_token"]).startswith("rft_a_")
+        assert "agent_token" not in started_run
+        assert str(started_run["worktree"]).endswith("repo.worktrees/demo")
+
+    rf.run_review(scenario)
+
+
+def test_start_through_review_refused(rf: ReviewFactory) -> None:
+    async def scenario(wf: Workflow, review: Review) -> None:
+        with pytest.raises(ReviewError) as refused:
+            await review.start(HUMAN, CHANGE, str(rf.root / "not-a-root"))
+        assert refused.value.status == 409
+        assert wf.store.runs() == []
 
     rf.run_review(scenario)

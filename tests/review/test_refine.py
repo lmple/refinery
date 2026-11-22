@@ -8,6 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import cast
 
+import pytest
 import uvicorn
 from typer.testing import CliRunner
 
@@ -16,6 +17,7 @@ from refinery.cli.refine import app
 from refinery.factoryd.app import create_app
 from refinery.factoryd.workflow import Workflow
 from refinery.review.service import Review
+from tests.gate.conftest import git
 from tests.review.conftest import ReviewFactory, started, to_review
 
 runner = CliRunner()
@@ -116,3 +118,48 @@ def test_runs_waiting_and_status(rf: ReviewFactory) -> None:
     assert "tests_review" in status.output
     assert unknown.exit_code != 0
     assert "nope.1" in unknown.output
+
+
+def test_start_from_the_cli(rf: ReviewFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    git(rf.root, "checkout", "-q", "main")  # runs start from the main checkout
+    monkeypatch.chdir(rf.root)  # --root defaults to the current directory
+    token = TokenStore(rf.data).create(Role.HUMAN).secret
+    with serving(rf) as url:
+        result = runner.invoke(app, ["start", "demo"], env=env(url, token))
+    assert result.exit_code == 0, result.output
+    assert "demo.1: spec" in result.output
+    assert str(rf.root.parent / "repo.worktrees" / "demo") in result.output
+    assert "rft_a_" not in result.output
+    assert "token" not in result.output
+
+
+def stuck_run(rf: ReviewFactory) -> str:
+    """A run whose two attempts failed, prepared before factoryd serves."""
+
+    async def prepare(wf: Workflow, review: Review) -> str:
+        run_id, _ = await started(wf, rf)
+        for _ in range(2):
+            claimed = await wf.jobs.claim("x0000001", [], "http://127.0.0.1/mcp")
+            assert claimed is not None
+            await wf.jobs.finish("x0000001", str(claimed["job"]), "exited", 1, "")
+        assert wf.jobs.stuck(run_id)
+        return run_id
+
+    return rf.run_review(prepare)
+
+
+def test_retry_from_the_cli(rf: ReviewFactory) -> None:
+    run_id = stuck_run(rf)
+    token = TokenStore(rf.data).create(Role.HUMAN).secret
+    with serving(rf) as url:
+        before = runner.invoke(app, ["status", run_id], env=env(url, token))
+        waiting = runner.invoke(app, ["runs", "--waiting"], env=env(url, token))
+        result = runner.invoke(app, ["retry", run_id], env=env(url, token))
+        after = runner.invoke(app, ["status", run_id], env=env(url, token))
+        again = runner.invoke(app, ["retry", run_id], env=env(url, token))
+    assert "stuck" in before.output, before.output
+    assert run_id in waiting.output
+    assert result.exit_code == 0, result.output
+    assert after.exit_code == 0, after.output
+    assert "waiting" in after.output
+    assert again.exit_code != 0

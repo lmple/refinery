@@ -32,6 +32,7 @@ class Role(StrEnum):
 
     HUMAN = "human"
     AGENT = "agent"
+    RUNNER = "runner"  # the runner API only (runner D3)
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,9 @@ class TokenStore:
         self.directory = data_dir / "tokens"
 
     def create(self, role: Role, run_id: str | None = None) -> Issued:
-        """A new token; agent tokens need ``run_id``, human tokens must not have one."""
+        """A new token; agent tokens need ``run_id``, others must not have one."""
+        if role is Role.RUNNER:
+            raise NotImplementedError("runner tokens (runner D3)")
         if role is Role.AGENT and run_id is None:
             raise ValueError("an agent token must be bound to a run")
         if role is Role.HUMAN and run_id is not None:
@@ -118,6 +121,10 @@ class TokenStore:
                 dataclasses.replace(token, revoked_at=datetime.now(UTC)), stored_digest
             )
         return True
+
+    def revoke_run(self, run_id: str, keep: str | None = None) -> list[str]:
+        """Revoke every live agent token of ``run_id`` except ``keep``; their ids."""
+        raise NotImplementedError("per-run revocation (runner D3)")
 
     def list(self) -> list[Token]:
         """Every token, by creation time."""

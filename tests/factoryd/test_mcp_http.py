@@ -19,7 +19,7 @@ from refinery.auth.tokens import Role, TokenStore
 from refinery.factoryd.app import create_app
 from refinery.factoryd.mcp import TOOLS
 from tests.factoryd.conftest import Factory
-from tests.gate.conftest import CHANGE
+from tests.gate.conftest import CHANGE, git
 
 
 @asynccontextmanager
@@ -162,6 +162,8 @@ def test_listing_tools(fx: Factory) -> None:
 
 def test_round_trip_and_role_refusal(fx: Factory) -> None:
     token = human_token(fx)
+    git(fx.root, "checkout", "-q", "main")  # runs start from the main checkout
+    worktree = fx.root.parent / f"{fx.root.name}.worktrees" / CHANGE
 
     async def scenario(url: str) -> None:
         async with session(url, token) as human:
@@ -170,14 +172,17 @@ def test_round_trip_and_role_refusal(fx: Factory) -> None:
             assert refused.is_error
             started = payload(
                 await human.call_tool(
-                    "start_workflow", {"change": CHANGE, "worktree": str(fx.root)}
+                    "start_workflow", {"change": CHANGE, "root": str(fx.root)}
                 )
             )
         assert (started["run_id"], started["phase"]) == ("demo.1", "spec")
-        agent_token = str(started["agent_token"])
+        assert started["worktree"] == str(worktree)
+        assert "agent_token" not in started
+        # Agent tokens come from job claims (agent-jobs); one stands in here.
+        agent_token = TokenStore(fx.data).create(Role.AGENT, run_id="demo.1").secret
         async with session(url, agent_token) as agent:
             denied = await agent.call_tool(
-                "start_workflow", {"change": "other", "worktree": str(fx.root)}
+                "start_workflow", {"change": "other", "root": str(fx.root)}
             )
             assert isinstance(denied, types.CallToolResult)
             assert denied.is_error
@@ -187,11 +192,31 @@ def test_round_trip_and_role_refusal(fx: Factory) -> None:
                 "spec",
                 "agent",
             )
+            assert task["worktree"] == str(worktree)
             submitted = payload(await agent.call_tool("submit_for_review", {}))
             assert submitted["phase"] == "model"
             progress = payload(
                 await agent.call_tool("report_progress", {"message": "hi"})
             )
             assert progress["recorded"] is True
+
+    run(fx, scenario)
+
+
+# access-tokens, Requirement: Token roles ("Runner token is only for the runner API")
+
+
+def test_runner_token_cannot_use_the_tools(fx: Factory) -> None:
+    token = TokenStore(fx.data).create(Role.RUNNER).secret
+
+    async def scenario(url: str) -> None:
+        async with session(url, token) as runner:
+            for tool, args in (
+                ("get_task", {}),
+                ("start_workflow", {"change": CHANGE, "root": str(fx.root)}),
+            ):
+                refused = await runner.call_tool(tool, args)
+                assert isinstance(refused, types.CallToolResult)
+                assert refused.is_error
 
     run(fx, scenario)

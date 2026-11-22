@@ -10,6 +10,7 @@ from refinery.review.repo import Tools
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8740
 DEFAULT_SHUTDOWN_TIMEOUT_S = 5.0
+DEFAULT_AGENT_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class ServerConfig:
     tools: Tools = field(default_factory=Tools)  # git, gh, openspec
     # How long open requests get to finish on shutdown before they are cut off.
     shutdown_timeout_s: float = DEFAULT_SHUTDOWN_TIMEOUT_S
+    # Failed attempts that make a run stuck (REFINERY_AGENT_ATTEMPTS).
+    agent_attempts: int = DEFAULT_AGENT_ATTEMPTS
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "ServerConfig":
