@@ -60,6 +60,10 @@ class RunStore:
             raise KeyError(run_id)
         return rec
 
+    def runs(self) -> list[RunRecord]:
+        """Every known run, ordered by run id."""
+        return self._index.runs()
+
     def worktree(self, run_id: str) -> Path:
         """The worktree holding the run's record; ``KeyError`` if unknown."""
         path = self._index.record_path(run_id)
