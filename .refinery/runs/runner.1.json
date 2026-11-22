@@ -1,0 +1,19 @@
+{
+  "approved": {
+    "spec": null,
+    "tests": null
+  },
+  "change": "runner",
+  "frozen": [],
+  "phase": "spec_review",
+  "run_id": "runner.1",
+  "schema": 1,
+  "seq": 3,
+  "started_at": "2026-11-22T22:23:22.473491+00:00",
+  "trace": {
+    "events": null,
+    "sha256": null,
+    "verdict": "none"
+  },
+  "updated_at": "2026-11-22T22:49:23.835700+00:00"
+}
