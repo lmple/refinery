@@ -5,6 +5,7 @@ Each function takes the current record and a request and returns ``Accepted``
 """
 
 import dataclasses
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -88,6 +89,9 @@ RULES: Mapping[Action, TransitionRule] = {
 }
 
 
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
 def _blank(text: str | None) -> bool:
     return text is None or not text.strip()
 
@@ -104,7 +108,24 @@ def _event(seq: int, request: TransitionRequest, src: Phase, dst: Phase) -> Even
         reason=request.reason,
         bug=request.bug,
         gate=request.gate,
+        commit=request.commit,
     )
+
+
+def _approved(
+    artifact: Artifact,
+    frozen: frozenset[Artifact],
+    current: str | None,
+    request: TransitionRequest,
+) -> str | None:
+    """The artifact's approved commit after the move: set when frozen by this
+    approval, kept while frozen, gone once unfrozen."""
+    if artifact not in frozen:
+        return None
+    approving = {Artifact.SPEC: A.APPROVE_SPEC, Artifact.TESTS: A.APPROVE_TESTS}[
+        artifact
+    ]
+    return request.commit if request.name is approving else current
 
 
 def _step(
@@ -119,15 +140,26 @@ def _step(
             f"{request.name} must be requested by {rule.role}, not {request.actor}"
         )
     event = _event(record.seq + 1, request, record.phase, rule.target)
+    frozen = record.frozen if rule.freeze is None else rule.freeze
     moved = dataclasses.replace(
         record,
         phase=rule.target,
-        frozen=record.frozen if rule.freeze is None else rule.freeze,
+        frozen=frozen,
         seq=record.seq + 1,
         trace=record.trace if trace is None else trace,
         updated_at=request.at,
+        spec_commit=_approved(Artifact.SPEC, frozen, record.spec_commit, request),
+        tests_commit=_approved(Artifact.TESTS, frozen, record.tests_commit, request),
     )
     return Accepted(moved, event)
+
+
+def _with_commit(record: RunRecord, request: TransitionRequest) -> Outcome:
+    if request.commit is None or not _COMMIT.fullmatch(request.commit):
+        return Refused(
+            f"{request.name} needs the full 40-hex SHA of the reviewed commit"
+        )
+    return _step(record, request)
 
 
 def _with_note(record: RunRecord, request: TransitionRequest) -> Outcome:
@@ -179,8 +211,8 @@ def skip_model(record: RunRecord, request: TransitionRequest) -> Outcome:
 
 
 def approve_spec(record: RunRecord, request: TransitionRequest) -> Outcome:
-    """ApproveSpec: spec_review → tests; freezes the spec."""
-    return _step(record, request)
+    """ApproveSpec: spec_review → tests; freezes the spec at the reviewed commit."""
+    return _with_commit(record, request)
 
 
 def reject_spec(record: RunRecord, request: TransitionRequest) -> Outcome:
@@ -194,8 +226,8 @@ def complete_tests(record: RunRecord, request: TransitionRequest) -> Outcome:
 
 
 def approve_tests(record: RunRecord, request: TransitionRequest) -> Outcome:
-    """ApproveTests: tests_review → impl; freezes the tests too."""
-    return _step(record, request)
+    """ApproveTests: tests_review → impl; freezes the tests at the reviewed commit."""
+    return _with_commit(record, request)
 
 
 def reject_tests(record: RunRecord, request: TransitionRequest) -> Outcome:

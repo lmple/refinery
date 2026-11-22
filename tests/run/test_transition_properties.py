@@ -7,6 +7,7 @@ accept exactly what the spec allows and keep every invariant.
 """
 
 import dataclasses
+import re
 from dataclasses import dataclass
 
 from hypothesis import given, settings
@@ -44,6 +45,12 @@ P = Phase
 
 STEP_ACTIONS = [a for a in Action if a is not A.START_RUN]
 NOTES = st.sampled_from([None, "", "  ", "looks wrong"])
+VALID_COMMIT = re.compile(r"[0-9a-f]{40}")
+# Mostly valid reviewed commits; sometimes missing or malformed.
+COMMITS = st.one_of(
+    st.sampled_from(["c" * 40, "0123456789abcdef0123456789abcdef01234567"]),
+    st.sampled_from([None, "", "abc123", "C" * 40, "c" * 39, "g" * 40]),
+)
 UNFREEZERS = {A.RESOLVE_TO_SPEC, A.RESOLVE_TO_TESTS}
 
 
@@ -70,6 +77,8 @@ def spec_allows(record: RunRecord, req: TransitionRequest) -> bool:
             return filled["reason"]
         case A.ESCALATE:
             return req.bug is not None and filled["reason"]
+        case A.APPROVE_SPEC | A.APPROVE_TESTS:
+            return req.commit is not None and bool(VALID_COMMIT.fullmatch(req.commit))
         case A.RESOLVE_TO_IMPL:
             return Artifact.TESTS in record.frozen
         case A.RETRY_ARCHIVE:
@@ -103,6 +112,7 @@ def step_for(draw: st.DrawFn, record: RunRecord) -> Step:
             note=draw(NOTES) if draw(st.booleans()) else "fine by me",
             reason=draw(NOTES) if draw(st.booleans()) else "because",
             bug=draw(st.sampled_from([None, BugKind.SPEC_BUG, BugKind.TEST_BUG])),
+            commit=draw(COMMITS),
         )
     )
 
@@ -125,6 +135,9 @@ def check_invariants(record: RunRecord, events: list[Event]) -> None:
         assert positions == sorted(positions), seen
     if record.trace.verdict is Verdict.FAIL:
         assert record.phase in {P.ARCHIVE, P.CANCELLED}
+    # Approvals record the reviewed commit: one exactly per frozen artifact.
+    assert (record.spec_commit is not None) == (Artifact.SPEC in record.frozen)
+    assert (record.tests_commit is not None) == (Artifact.TESTS in record.frozen)
 
 
 @settings(max_examples=300, deadline=None)

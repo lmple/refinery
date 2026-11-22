@@ -119,6 +119,9 @@ HAPPY_PATH: tuple[Action, ...] = (
 
 T0 = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
 FAKE_SHA = "0" * 64
+# Reviewed commits for the default approvals (any 40-hex SHA is valid).
+SPEC_COMMIT = "a" * 40
+TESTS_COMMIT = "b" * 40
 
 
 def at(minutes: int) -> datetime:
@@ -142,6 +145,8 @@ def request(
         A.REJECT_TESTS: {"note": "test names do not match scenarios"},
         A.REJECT_FINAL: {"note": "diff touches an unrelated file"},
         A.SKIP_MODEL: {"reason": "docs only, no behaviour change"},
+        A.APPROVE_SPEC: {"commit": SPEC_COMMIT},
+        A.APPROVE_TESTS: {"commit": TESTS_COMMIT},
         A.ESCALATE: {
             "bug": BugKind.TEST_BUG,
             "reason": "test 2 contradicts scenario 4",

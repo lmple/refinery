@@ -40,6 +40,7 @@ def to_json(record: RunRecord) -> str:
             "frozen": sorted(a.value for a in record.frozen),
             "seq": record.seq,
             "trace": trace,
+            "approved": {"spec": record.spec_commit, "tests": record.tests_commit},
             "started_at": record.started_at.isoformat(),
             "updated_at": record.updated_at.isoformat(),
         },
@@ -53,6 +54,10 @@ def from_json(text: str) -> RunRecord:
     if _json.get_int(obj, "schema") != SCHEMA_VERSION:
         raise _json.FormatError(f"unsupported run record schema {obj.get('schema')}")
     trace = _json.get_object(obj, "trace")
+    # Records written before approvals carried commits have no "approved".
+    approved = (
+        _json.get_object(obj, "approved") if obj.get("approved") is not None else {}
+    )
     return RunRecord(
         run_id=_json.get_str(obj, "run_id"),
         change=_json.get_str(obj, "change"),
@@ -66,6 +71,8 @@ def from_json(text: str) -> RunRecord:
         ),
         started_at=_json.get_datetime(obj, "started_at"),
         updated_at=_json.get_datetime(obj, "updated_at"),
+        spec_commit=_json.get_opt_str(approved, "spec"),
+        tests_commit=_json.get_opt_str(approved, "tests"),
     )
 
 
