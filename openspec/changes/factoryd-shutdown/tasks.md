@@ -40,6 +40,6 @@ reason given.
 ## 3. Verify
 
 - [x] 3.1 Verify: `make gate` is green.
-- [ ] 3.2 By hand: the real factoryd with this Claude Code session
+- [x] 3.2 By hand: the real factoryd with this Claude Code session
       connected. Ctrl-C once exits within about 5 s, and Ctrl-C twice
       also exits, with no traceback.
