@@ -165,7 +165,9 @@ java -jar ../tools/tla2tools.jar -workers auto -config <M>.cfg <M>.tla
 
 - One task = one commit. Message format: `<area>: <imperative summary>` (e.g.
   `scheduler: add per-module lock`).
-- Never commit with a failing gate.
+- Never commit with a failing gate, except in the tests phase: there the new
+  tests must fail for the stated reason, and every other check must pass.
+  Never merge with a failing gate.
 - Never rewrite history on `main`.
 
 ## Bootstrap note
