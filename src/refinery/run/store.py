@@ -60,6 +60,14 @@ class RunStore:
             raise KeyError(run_id)
         return rec
 
+    def worktree(self, run_id: str) -> Path:
+        """The worktree holding the run's record; ``KeyError`` if unknown."""
+        path = self._index.record_path(run_id)
+        if path is None:
+            raise KeyError(run_id)
+        # <worktree>/.refinery/runs/<run-id>.json
+        return path.parents[len(record.RECORD_DIR.parts)]
+
     def events(self, run_id: str) -> list[Event]:
         """The committed events of ``run_id``."""
         return self._index.events(run_id)
