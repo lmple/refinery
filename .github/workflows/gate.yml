@@ -1,7 +1,10 @@
 name: gate
 
+# Push only on main: feature branches are covered by their pull request, so
+# also triggering on every branch push would run the gate twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
