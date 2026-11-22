@@ -68,27 +68,27 @@ The work is committed before each submission into a review.
 
 ## 2. Implementation
 
-- [ ] 2.1 Implement the `git` helpers over the supervisor (D2, D3). Verify:
+- [x] 2.1 Implement the `git` helpers over the supervisor (D2, D3). Verify:
       the helper tests in 1.2 pass.
-- [ ] 2.2 Implement `Review` decisions, the queue and the start checks (D1,
+- [x] 2.2 Implement `Review` decisions, the queue and the start checks (D1,
       D2, D6). Verify: 1.1 passes.
-- [ ] 2.3 Implement publishing, and call it from `Workflow` and `Review`
+- [x] 2.3 Implement publishing, and call it from `Workflow` and `Review`
       (D3). Verify: 1.2 passes.
-- [ ] 2.4 Implement the archive sequence, retry, and resuming on startup
+- [x] 2.4 Implement the archive sequence, retry, and resuming on startup
       (D4). Verify: 1.3 passes.
-- [ ] 2.5 Implement the API routes and mount them; add `last_decision` and
+- [x] 2.5 Implement the API routes and mount them; add `last_decision` and
       `pr` to `get_task` (D5, D7). Verify: 1.4 and 1.6 pass.
-- [ ] 2.6 Implement the `refine` CLI (D8). Verify: 1.5 passes.
-- [ ] 2.7 Update `docs/vision.md`: the change order (`review-queue` before
+- [x] 2.6 Implement the `refine` CLI (D8). Verify: 1.5 passes.
+- [x] 2.7 Update `docs/vision.md`: the change order (`review-queue` before
       `runner`) and the MVP review text. Verify: it matches this change.
-- [ ] 2.8 Shutdown diagnostics: `refinery serve` registers faulthandler on
+- [x] 2.8 Shutdown diagnostics: `refinery serve` registers faulthandler on
       SIGUSR1 (D10). Verify: `tests/factoryd/test_shutdown.py` passes. Its
       SIGINT test is a regression guard and already passes; the SIGUSR1 test
       fails before this task.
 
 ## 3. Verify
 
-- [ ] 3.1 Verify: `make gate` is green, and `make tla-big` reports no
+- [x] 3.1 Verify: `make gate` is green, and `make tla-big` reports no
       violation.
 - [ ] 3.2 End to end, by hand: a scratch run in a clone with a local bare
       remote and a fake `gh`. Drive it with `refine` and the agent tools
