@@ -55,7 +55,7 @@ class GateConfig:
     git: str = "git"
     tla_jar: Path | None = None  # passed to make as TLA_JAR
     env: Mapping[str, str] | None = None  # None: factoryd's environment
-    poll_s: float = 0.2  # how often a running step checks the run is in verify
+    poll_s: float = 0.2  # how often a running step checks the run's phase
 
 
 @dataclass(frozen=True)
@@ -73,19 +73,35 @@ class StepResult:
 
 @dataclass(frozen=True)
 class GateReport:
-    """A gate run that finished, or stopped because the run left verify."""
+    """A gate run or dry run that finished, or stopped because the run left
+    its phase."""
 
     run_id: str
     gate_id: str
     directory: Path
     steps: tuple[StepResult, ...]
     passed: bool
-    # The PassGate/FailGate outcome; None if the run left verify mid-gate.
+    # The PassGate/FailGate outcome; None for a dry run, or a gate run whose
+    # run left verify mid-gate.
     transition: TransitionOutcome | None
 
 
+@dataclass(frozen=True)
+class _Kind:
+    """What distinguishes a gate run from a dry run."""
+
+    phases: frozenset[Phase]  # where it may run (and keeps running)
+    records: str  # directory under runs/<run-id>/
+    prefix: str  # id prefix: g1, g2, ... or d1, d2, ...
+    transition: bool  # records PassGate / FailGate
+
+
+_GATE = _Kind(frozenset({Phase.VERIFY}), "gates", "g", transition=True)
+_DRY = _Kind(frozenset({Phase.TESTS, Phase.IMPL}), "dry-runs", "d", transition=False)
+
+
 class GateRunner:
-    """Runs gates; at most one per run at a time."""
+    """Runs gates and dry runs; at most one of either per run at a time."""
 
     def __init__(
         self,
@@ -99,14 +115,15 @@ class GateRunner:
         self._supervisor = supervisor
         self._config = config
         self._data_dir = data_dir
+        # Gate runs and dry runs share one map: they exclude each other.
         self._tasks: dict[str, asyncio.Task[object]] = {}
 
     def running(self, run_id: str) -> bool:
-        """Whether a gate run is in progress for ``run_id``."""
+        """Whether a gate run or dry run is in progress for ``run_id``."""
         return run_id in self._tasks
 
     def cancel(self, run_id: str) -> bool:
-        """Cancel the run's gate run, killing its step; False if none runs."""
+        """Cancel the run's gate run or dry run, killing its step; False if none."""
         task = self._tasks.get(run_id)
         if task is None:
             return False
@@ -115,64 +132,98 @@ class GateRunner:
 
     async def run_gate(self, run_id: str) -> GateReport | Refused:
         """Run every step, then record PassGate or FailGate."""
+        return await self._run(run_id, _GATE)
+
+    async def dry_run(self, run_id: str) -> GateReport | Refused:
+        """The same steps for a run in tests or impl, under dry-runs/; no transition."""
+        return await self._run(run_id, _DRY)
+
+    async def _run(self, run_id: str, kind: _Kind) -> GateReport | Refused:
         if run_id in self._tasks:
-            return Refused(f"a gate run is already in progress for {run_id}")
+            return Refused(f"a gate run or dry run is already in progress for {run_id}")
         try:
             record = self._store.get(run_id)
         except KeyError:
             return Refused(f"unknown run {run_id}")
-        if record.phase is not Phase.VERIFY:
-            return Refused(f"gate runs need phase verify, not {record.phase}")
+        if record.phase not in kind.phases:
+            allowed = ", ".join(sorted(p.value for p in kind.phases))
+            return Refused(f"needs phase {allowed}, not {record.phase}")
         task = asyncio.current_task()
         assert task is not None
         self._tasks[run_id] = task  # no await since the check above: atomic
         try:
-            return await self._gate(run_id)
+            if not kind.transition:
+                return await self._steps(run_id, kind)
+            try:
+                return await self._steps(run_id, kind)
+            except Exception as exc:  # any internal error fails closed
+                return await self._fail_closed(run_id, exc)
         finally:
             del self._tasks[run_id]
 
-    async def _gate(self, run_id: str) -> GateReport:
-        directory = self._new_gate_dir(run_id)
+    async def _steps(self, run_id: str, kind: _Kind) -> GateReport:
+        directory = self._new_dir(run_id, kind)
         worktree = self._store.worktree(run_id)
         results: list[StepResult] = []
         for step in Step:
-            if not self._in_verify(run_id):
-                return self._report(run_id, directory, results, None)
-            result = await self._watched(run_id, step, directory, worktree)
+            if not self._in(run_id, kind):
+                return _report(run_id, directory, results, None, complete=False)
+            result = await self._watched(run_id, kind, step, directory, worktree)
             results.append(result)
             if result.outcome is Outcome.CANCELLED:
-                return self._report(run_id, directory, results, None)
+                return _report(run_id, directory, results, None, complete=False)
         passed = all(r.passed for r in results)
         _write_json(
             directory / "result.json",
             _result_json(run_id, directory.name, results, passed),
         )
+        if not kind.transition:
+            return _report(run_id, directory, results, None, complete=True)
         failed = [r.step.value for r in results if not r.passed]
+        transition = await self._record(
+            run_id,
+            passed,
+            directory.name,
+            None if passed else f"failed: {', '.join(failed)}",
+        )
+        return _report(run_id, directory, results, transition, complete=True)
+
+    async def _fail_closed(self, run_id: str, exc: Exception) -> GateReport:
+        """An internal error: every step not passed counts as failed; FailGate."""
+        transition = await self._record(run_id, False, None, f"gate error: {exc!r}")
+        return GateReport(run_id, "", Path(), (), False, transition)
+
+    async def _record(
+        self, run_id: str, passed: bool, gate_id: str | None, reason: str | None
+    ) -> TransitionOutcome:
         request = TransitionRequest(
             Action.PASS_GATE if passed else Action.FAIL_GATE,
             Role.FACTORYD,
             datetime.now(UTC),
-            gate=directory.name,
-            reason=None if passed else f"failed: {', '.join(failed)}",
+            gate=gate_id,
+            reason=reason,
         )
-        transition = await self._store.transition(run_id, request)
-        return self._report(run_id, directory, results, transition)
+        return await self._store.transition(run_id, request)
 
-    def _new_gate_dir(self, run_id: str) -> Path:
-        """``g<n+1>``: ids of earlier gate runs, finished or not, are never reused."""
-        gates = self._data_dir / "runs" / run_id / "gates"
-        taken = [int(p.name[1:]) for p in gates.glob("g*") if p.name[1:].isdigit()]
-        directory = gates / f"g{max(taken, default=0) + 1}"
+    def _new_dir(self, run_id: str, kind: _Kind) -> Path:
+        """``<prefix><n+1>``: ids of earlier runs, finished or not, are never reused."""
+        base = self._data_dir / "runs" / run_id / kind.records
+        taken = [
+            int(p.name[1:])
+            for p in base.glob(f"{kind.prefix}*")
+            if p.name[1:].isdigit()
+        ]
+        directory = base / f"{kind.prefix}{max(taken, default=0) + 1}"
         directory.mkdir(parents=True)
         return directory
 
-    def _in_verify(self, run_id: str) -> bool:
-        return self._store.get(run_id).phase is Phase.VERIFY
+    def _in(self, run_id: str, kind: _Kind) -> bool:
+        return self._store.get(run_id).phase in kind.phases
 
     async def _watched(
-        self, run_id: str, step: Step, directory: Path, worktree: Path
+        self, run_id: str, kind: _Kind, step: Step, directory: Path, worktree: Path
     ) -> StepResult:
-        """Run one step; kill it if the run leaves verify meanwhile."""
+        """Run one step; kill it if the run leaves the kind's phases meanwhile."""
         started = time.monotonic()
         log = directory / f"{step}.log"
         work = asyncio.create_task(self._step(step, log, run_id, worktree))
@@ -181,11 +232,11 @@ class GateRunner:
                 done, _ = await asyncio.wait({work}, timeout=self._config.poll_s)
                 if done:
                     return work.result()
-                if not self._in_verify(run_id):
+                if not self._in(run_id, kind):
                     work.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await work
-                    _append(log, "stopped: the run left verify\n")
+                    _append(log, "stopped: the run left its phase\n")
                     return StepResult(
                         step,
                         False,
@@ -193,7 +244,7 @@ class GateRunner:
                         None,
                         time.monotonic() - started,
                         log,
-                        "the run left verify",
+                        "the run left its phase",
                     )
         except asyncio.CancelledError:
             # The gate run itself was cancelled: take the step down with it.
@@ -249,17 +300,21 @@ class GateRunner:
             call.reason,
         )
 
-    @staticmethod
-    def _report(
-        run_id: str,
-        directory: Path,
-        results: list[StepResult],
-        transition: TransitionOutcome | None,
-    ) -> GateReport:
-        passed = transition is not None and all(r.passed for r in results)
-        return GateReport(
-            run_id, directory.name, directory, tuple(results), passed, transition
-        )
+
+def _report(
+    run_id: str,
+    directory: Path,
+    results: list[StepResult],
+    transition: TransitionOutcome | None,
+    *,
+    complete: bool,
+) -> GateReport:
+    """Passed only if every step ran and passed (and, for a gate run, the result
+    was recorded)."""
+    passed = complete and all(r.passed for r in results)
+    return GateReport(
+        run_id, directory.name, directory, tuple(results), passed, transition
+    )
 
 
 def _result_json(
