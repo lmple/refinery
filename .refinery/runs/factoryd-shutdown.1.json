@@ -1,0 +1,19 @@
+{
+  "approved": {
+    "spec": null,
+    "tests": null
+  },
+  "change": "factoryd-shutdown",
+  "frozen": [],
+  "phase": "spec_review",
+  "run_id": "factoryd-shutdown.1",
+  "schema": 1,
+  "seq": 3,
+  "started_at": "2026-11-22T21:44:38.466679+00:00",
+  "trace": {
+    "events": null,
+    "sha256": null,
+    "verdict": "none"
+  },
+  "updated_at": "2026-11-22T21:49:10.229456+00:00"
+}
