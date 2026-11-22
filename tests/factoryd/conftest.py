@@ -77,12 +77,25 @@ def fx(tmp_path: Path) -> Factory:
     return factory
 
 
+async def start_with_token(
+    wf: Workflow, fx: Factory, change: str = CHANGE
+) -> tuple[str, str]:
+    """A run with its record in the root, as runs started before the runner
+    change are, and an agent token for it; returns its id and the token.
+
+    Starting through start_workflow (worktree creation) has its own tests;
+    the scenarios here are about what happens after the start.
+    """
+    outcome = await wf.store.start_run(change, fx.root, request(A.START_RUN))
+    run_id = accepted(outcome).record.run_id
+    return run_id, wf.tokens.create(Role.AGENT, run_id=run_id).secret
+
+
 async def start(
     wf: Workflow, fx: Factory, change: str = CHANGE
 ) -> tuple[str, Principal]:
-    """A run started by the human; returns its id and its agent."""
-    started = await wf.start_workflow(HUMAN, change, str(fx.root))
-    run_id, token = str(started["run_id"]), str(started["agent_token"])
+    """A started run (see ``start_with_token``); returns its id and its agent."""
+    run_id, token = await start_with_token(wf, fx, change)
     agent = wf.authenticate(token)
     assert agent is not None
     return run_id, agent
