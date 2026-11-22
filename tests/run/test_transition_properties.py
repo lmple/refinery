@@ -6,6 +6,7 @@ accept exactly what the spec allows and keep every invariant.
 (OneActiveRunPerChange spans runs and is checked in test_store_crash.py.)
 """
 
+import dataclasses
 from dataclasses import dataclass
 
 from hypothesis import given, settings
@@ -182,24 +183,16 @@ def test_replay_validator_rejects_a_corrupted_log(data: st.DataObject) -> None:
             events.append(outcome.event)
     victim = data.draw(st.integers(0, len(events) - 1), label="victim")
     original = events[victim]
+    # Corrupt either end of one event: the replay must check both.
+    field = data.draw(st.sampled_from(["from_phase", "to_phase"]), label="field")
+    current: Phase = getattr(original, field)
     wrong = data.draw(
-        st.sampled_from([p for p in Phase if p is not original.to_phase]), label="to"
+        st.sampled_from([p for p in Phase if p is not current]), label="wrong"
     )
-    corrupted = [*events[:victim], _with_to(original, wrong), *events[victim + 1 :]]
+    corrupted = [
+        *events[:victim],
+        dataclasses.replace(original, **{field: wrong}),
+        *events[victim + 1 :],
+    ]
     verdict = run_async(ReplayValidator().validate(record.run_id, corrupted))
     assert not verdict.passed
-
-
-def _with_to(event: Event, to_phase: Phase) -> Event:
-    return Event(
-        seq=event.seq,
-        name=event.name,
-        from_phase=event.from_phase,
-        to_phase=to_phase,
-        actor=event.actor,
-        at=event.at,
-        note=event.note,
-        reason=event.reason,
-        bug=event.bug,
-        gate=event.gate,
-    )
