@@ -45,6 +45,7 @@ def to_json(event: Event) -> str:
         "reason": event.reason,
         "bug": None if event.bug is None else event.bug.value,
         "gate": event.gate,
+        "commit": event.commit,
     }
     obj |= {k: v for k, v in optional.items() if v is not None}
     return _json.dump_object(obj, pretty=False)
@@ -65,6 +66,7 @@ def from_json(line: str) -> Event:
         reason=_json.get_opt_str(obj, "reason"),
         bug=None if bug is None else BugKind(bug),
         gate=_json.get_opt_str(obj, "gate"),
+        commit=_json.get_opt_str(obj, "commit"),
     )
 
 

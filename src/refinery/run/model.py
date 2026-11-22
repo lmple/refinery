@@ -105,6 +105,8 @@ class RunRecord:
     trace: TraceResult
     started_at: datetime
     updated_at: datetime
+    spec_commit: str | None = None  # approved commit of the frozen spec
+    tests_commit: str | None = None  # approved commit of the frozen tests
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,7 @@ class TransitionRequest:
     reason: str | None = None
     bug: BugKind | None = None
     gate: str | None = None
+    commit: str | None = None  # reviewed commit, on ApproveSpec / ApproveTests
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,7 @@ class Event:
     reason: str | None = None
     bug: BugKind | None = None
     gate: str | None = None
+    commit: str | None = None
 
 
 @dataclass(frozen=True)
