@@ -1,8 +1,14 @@
 """The factoryd ASGI app: MCP at /mcp, the human API at /api, and a lifespan that
-opens and closes the Workflow."""
+opens and closes the Workflow.
 
-from collections.abc import AsyncGenerator
+Closing is also reachable from outside the lifespan, through ``shutdown(app)``:
+uvicorn skips the lifespan shutdown on a forced exit (a second Ctrl-C), and
+factoryd's own shutdown must run on every path (factoryd-server, Shutdown).
+"""
+
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import cast
 
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -20,6 +26,12 @@ def create_app(
 ) -> Starlette:
     """The app; ``app.state.workflow`` is the Workflow while it runs."""
     opened: dict[str, Workflow] = {}
+
+    async def close() -> None:
+        # Idempotent: the lifespan and serve() may both call it.
+        workflow = opened.pop("workflow", None)
+        if workflow is not None:
+            await workflow.close()
 
     def workflow() -> Workflow:
         try:
@@ -46,8 +58,17 @@ def create_app(
             async with mcp_app.router.lifespan_context(mcp_app):
                 yield
         finally:
-            await opened.pop("workflow").close()
+            await close()
 
-    return Starlette(
+    app = Starlette(
         routes=[Mount("/api", app=api), Mount("/", app=mcp_app)], lifespan=lifespan
     )
+    app.state.shutdown = close
+    return app
+
+
+async def shutdown(app: Starlette) -> None:
+    """factoryd's own shutdown (cancel gate runs, close the run index), if the
+    lifespan has not already run it."""
+    close = cast(Callable[[], Awaitable[None]], app.state.shutdown)
+    await close()

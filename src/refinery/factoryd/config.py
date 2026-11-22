@@ -9,6 +9,7 @@ from refinery.review.repo import Tools
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8740
+DEFAULT_SHUTDOWN_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -23,11 +24,14 @@ class ServerConfig:
     run_spec: Path | None = None
     gate: GateConfig = field(default_factory=GateConfig)
     tools: Tools = field(default_factory=Tools)  # git, gh, openspec
+    # How long open requests get to finish on shutdown before they are cut off.
+    shutdown_timeout_s: float = DEFAULT_SHUTDOWN_TIMEOUT_S
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "ServerConfig":
         """From REFINERY_DATA_DIR, REFINERY_ROOTS (colon-separated), REFINERY_HOST,
-        REFINERY_PORT, REFINERY_TLA_JAR and REFINERY_RUN_SPEC."""
+        REFINERY_PORT, REFINERY_TLA_JAR, REFINERY_RUN_SPEC and
+        REFINERY_SHUTDOWN_TIMEOUT (seconds)."""
         data_dir = environ.get("REFINERY_DATA_DIR")
         roots = environ.get("REFINERY_ROOTS", "")
         return cls(
@@ -37,6 +41,9 @@ class ServerConfig:
             port=int(environ.get("REFINERY_PORT", DEFAULT_PORT)),
             tla_jar=_path(environ.get("REFINERY_TLA_JAR")),
             run_spec=_path(environ.get("REFINERY_RUN_SPEC")),
+            shutdown_timeout_s=float(
+                environ.get("REFINERY_SHUTDOWN_TIMEOUT", DEFAULT_SHUTDOWN_TIMEOUT_S)
+            ),
         )
 
 

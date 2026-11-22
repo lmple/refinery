@@ -1,7 +1,10 @@
 """The ``refinery`` admin command: serve, and manage tokens."""
 
+import asyncio
 import dataclasses
 import faulthandler
+import logging
+import math
 import os
 import signal
 from pathlib import Path
@@ -11,7 +14,7 @@ import typer
 import uvicorn
 
 from refinery.auth.tokens import Role, TokenStore
-from refinery.factoryd.app import create_app
+from refinery.factoryd.app import create_app, shutdown
 from refinery.factoryd.config import ServerConfig, default_data_dir
 
 app = typer.Typer(help="factoryd administration.", no_args_is_help=True)
@@ -59,7 +62,50 @@ def serve(
             "refinery serve needs at least one --root (or REFINERY_ROOTS)", err=True
         )
         raise typer.Exit(2)
-    uvicorn.run(create_app(config), host=config.host, port=config.port, lifespan="on")
+    app = create_app(config)
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=config.host,
+            port=config.port,
+            lifespan="on",
+            # Bounded shutdown: without it uvicorn waits forever for a client
+            # that keeps its connection open, even after a second Ctrl-C (D1).
+            # uvicorn takes whole seconds: round up, never shorter than asked.
+            timeout_graceful_shutdown=math.ceil(config.shutdown_timeout_s),
+        )
+    )
+    # After uvicorn.Config, which configures uvicorn's loggers (D3).
+    logging.getLogger("uvicorn.error").addFilter(_report_cut_off_requests)
+
+    async def run() -> None:
+        try:
+            await server.serve()
+        finally:
+            await shutdown(app)  # a no-op unless uvicorn skipped the lifespan (D2)
+
+    asyncio.run(run())
+    if not server.started:
+        raise typer.Exit(3)  # could not start, e.g. the port is in use
+
+
+def _report_cut_off_requests(record: logging.LogRecord) -> bool:
+    """One warning for the requests the shutdown timeout cut off (D3).
+
+    uvicorn logs the count as an error, then one "Exception in ASGI
+    application" traceback per cancelled request. The count becomes a single
+    warning; tracebacks of cancelled requests are dropped. Every other
+    record passes unchanged.
+    """
+    if record.msg == "Cancel %s running task(s), timeout graceful shutdown exceeded":
+        count = record.args[0] if isinstance(record.args, tuple) else "?"
+        plural = "" if count == 1 else "s"
+        record.msg = f"shutdown timeout: cut off {count} request{plural} still open"
+        record.args = ()
+        record.levelno, record.levelname = logging.WARNING, "WARNING"
+        return True
+    exc_type = record.exc_info[0] if record.exc_info else None
+    return not (exc_type is not None and issubclass(exc_type, asyncio.CancelledError))
 
 
 @token_app.command("create")

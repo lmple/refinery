@@ -51,6 +51,13 @@ def test_configuration_from_the_environment(tmp_path: Path) -> None:
     assert config.run_spec == Path("/src/spec/Run.tla")
 
 
+def test_shutdown_timeout_setting(tmp_path: Path) -> None:
+    base = {"REFINERY_DATA_DIR": str(tmp_path), "REFINERY_ROOTS": "/r"}
+    configured = ServerConfig.from_env({**base, "REFINERY_SHUTDOWN_TIMEOUT": "1"})
+    assert configured.shutdown_timeout_s == 1.0
+    assert ServerConfig.from_env(base).shutdown_timeout_s == 5.0
+
+
 def test_default_data_directory(tmp_path: Path) -> None:
     xdg = ServerConfig.from_env(
         {"XDG_DATA_HOME": str(tmp_path), "REFINERY_ROOTS": "/r"}
