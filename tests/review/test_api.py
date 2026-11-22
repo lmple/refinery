@@ -13,8 +13,8 @@ from refinery.auth.tokens import Role, TokenStore
 from refinery.factoryd.app import create_app
 from refinery.factoryd.workflow import Workflow
 from refinery.run.model import Phase
-from tests.factoryd.conftest import HUMAN, rows
-from tests.gate.conftest import CHANGE
+from tests.factoryd.conftest import rows, start_with_token
+from tests.gate.conftest import CHANGE, git
 from tests.review.conftest import ReviewFactory, started, to_review
 
 P = Phase
@@ -88,8 +88,8 @@ def test_unknown_token(rf: ReviewFactory) -> None:
 
 def test_agent_token_on_the_api(rf: ReviewFactory) -> None:
     async def scenario(url: str, wf: Workflow) -> None:
-        started_run = await wf.start_workflow(HUMAN, CHANGE, str(rf.root))
-        async with client(url, str(started_run["agent_token"])) as http:
+        _, agent_token = await start_with_token(wf, rf)
+        async with client(url, agent_token) as http:
             listed = await http.get("/api/runs")
             assert listed.status_code == 403
             approve = await http.post("/api/runs/demo.1/approve", json={})
@@ -104,15 +104,24 @@ def test_agent_token_on_the_api(rf: ReviewFactory) -> None:
 
 def test_start_list_show_and_approve(rf: ReviewFactory) -> None:
     token = human_token(rf)
+    git(rf.root, "checkout", "-q", "main")  # runs start from the main checkout
+    worktree = rf.root.parent / f"{rf.root.name}.worktrees" / CHANGE
 
     async def scenario(url: str, wf: Workflow) -> None:
         async with client(url, token) as http:
             started_run = await http.post(
-                "/api/runs", json={"change": CHANGE, "worktree": str(rf.root)}
+                "/api/runs", json={"change": CHANGE, "root": str(rf.root)}
             )
             assert started_run.status_code == 200, started_run.text
-            run_id = str(body(started_run)["run_id"])
-            agent = wf.authenticate(str(body(started_run)["agent_token"]))
+            started_body = body(started_run)
+            run_id = str(started_body["run_id"])
+            assert (started_body["phase"], started_body["worktree"]) == (
+                "spec",
+                str(worktree),
+            )
+            assert "agent_token" not in started_body
+            # Agent tokens come from job claims (agent-jobs); one stands in here.
+            agent = wf.authenticate(wf.tokens.create(Role.AGENT, run_id=run_id).secret)
             assert agent is not None
             await to_review(wf, rf, run_id, agent)
             listed = body((await http.get("/api/runs")).raise_for_status())
@@ -124,6 +133,9 @@ def test_start_list_show_and_approve(rf: ReviewFactory) -> None:
             shown = body((await http.get(f"/api/runs/{run_id}")).raise_for_status())
             assert shown["phase"] == "spec_review"
             assert shown["pr"]
+            job = shown["job"]
+            assert isinstance(job, dict)
+            assert cast(dict[str, object], job)["state"] == "none"
             approved = await http.post(f"/api/runs/{run_id}/approve", json={})
             assert approved.status_code == 200, approved.text
             assert body(approved)["phase"] == "tests"
@@ -204,7 +216,7 @@ def test_invalid_requests(rf: ReviewFactory) -> None:
                 f"/api/runs/{run_id}/resolve", json={"to": "verify"}
             )
             assert bad_target.status_code == 422
-            no_change = await http.post("/api/runs", json={"worktree": str(rf.root)})
+            no_change = await http.post("/api/runs", json={"root": str(rf.root)})
             assert no_change.status_code == 422
         assert wf.store.get(run_id).phase is P.SPEC_REVIEW
 
@@ -215,5 +227,54 @@ def test_mcp_still_served_next_to_the_api(rf: ReviewFactory) -> None:
     async def scenario(url: str, wf: Workflow) -> None:
         async with client(url, None) as http:
             assert (await http.post("/mcp", json={})).status_code == 401
+
+    run(rf, scenario)
+
+
+# Requirement: Reading runs ("Show a running job")
+
+
+def test_show_a_running_job(rf: ReviewFactory) -> None:
+    token = human_token(rf)
+
+    async def scenario(url: str, wf: Workflow) -> None:
+        run_id, _ = await started(wf, rf)
+        claimed = await wf.jobs.claim("x0000001", [], "http://127.0.0.1/mcp")
+        assert claimed is not None
+        async with client(url, token) as http:
+            shown = body((await http.get(f"/api/runs/{run_id}")).raise_for_status())
+        job = cast(dict[str, object], shown["job"])
+        assert (job["state"], job["id"], job["runner"]) == (
+            "running",
+            "demo.1.j1",
+            "x0000001",
+        )
+        assert "log" in job
+
+    run(rf, scenario)
+
+
+# agent-jobs, Requirement: Retrying a stuck run (POST /api/runs/{id}/retry)
+
+
+def test_retry_a_stuck_run(rf: ReviewFactory) -> None:
+    token = human_token(rf)
+
+    async def scenario(url: str, wf: Workflow) -> None:
+        run_id, _ = await started(wf, rf)
+        async with client(url, token) as http:
+            not_stuck = await http.post(f"/api/runs/{run_id}/retry", json={})
+            assert not_stuck.status_code == 409
+            assert body(not_stuck)["error"]
+            for _ in range(2):
+                claimed = await wf.jobs.claim("x0000001", [], "http://127.0.0.1/mcp")
+                assert claimed is not None
+                await wf.jobs.finish("x0000001", str(claimed["job"]), "exited", 1, "")
+            retried = await http.post(f"/api/runs/{run_id}/retry", json={})
+            assert retried.status_code == 200, retried.text
+            shown = body((await http.get(f"/api/runs/{run_id}")).raise_for_status())
+            assert cast(dict[str, object], shown["job"])["state"] == "waiting"
+            unknown = await http.post("/api/runs/nope.1/retry", json={})
+            assert unknown.status_code == 404
 
     run(rf, scenario)

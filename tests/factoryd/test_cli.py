@@ -30,8 +30,22 @@ def test_agent_tokens_cannot_be_created_by_hand(tmp_path: Path) -> None:
         app, ["token", "create", "--role", "agent", "--data-dir", str(tmp_path)]
     )
     assert result.exit_code != 0
-    assert "start_workflow" in result.output
+    assert "claim" in result.output
     assert TokenStore(tmp_path).list() == []
+
+
+def test_create_a_runner_token(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["token", "create", "--role", "runner", "--data-dir", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    tokens = re.findall(r"rft_r_[0-9a-f]{8}_[0-9a-f]{64}", result.output)
+    assert len(tokens) == 1
+    verified = TokenStore(tmp_path).verify(tokens[0])
+    assert verified is not None
+    assert (verified.role, verified.run_id) == (Role.RUNNER, None)
+    listed = runner.invoke(app, ["token", "list", "--data-dir", str(tmp_path)])
+    assert "runner" in listed.output
 
 
 def test_list_never_shows_secrets(tmp_path: Path) -> None:

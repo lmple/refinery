@@ -17,9 +17,10 @@ from tests.factoryd.conftest import (
     human,
     rows,
     start,
+    start_with_token,
     to_phase,
 )
-from tests.gate.conftest import CHANGE
+from tests.gate.conftest import BRANCH, CHANGE, git
 from tests.run.helpers import request
 
 A = Action
@@ -76,10 +77,9 @@ def test_two_runs_two_agents(fx: Factory) -> None:
 
 def test_agent_of_an_ended_run_is_not_authenticated(fx: Factory) -> None:
     async def scenario(wf: Workflow) -> None:
-        started = await wf.start_workflow(HUMAN, CHANGE, str(fx.root))
-        token = str(started["agent_token"])
+        run_id, token = await start_with_token(wf, fx)
         assert wf.authenticate(token) is not None
-        await human(wf, fx, str(started["run_id"]), A.CANCEL)
+        await human(wf, fx, run_id, A.CANCEL)
         assert wf.authenticate(token) is None
 
     fx.run(scenario)
@@ -99,15 +99,19 @@ def test_principal_for_a_run_that_does_not_exist_is_refused(fx: Factory) -> None
 
 
 def test_start(fx: Factory) -> None:
+    git(fx.root, "checkout", "-q", "main")  # runs start from the main checkout
+    worktree = fx.root.parent / f"{fx.root.name}.worktrees" / CHANGE
+
     async def scenario(wf: Workflow) -> None:
         started = await wf.start_workflow(HUMAN, CHANGE, str(fx.root))
         assert (started["run_id"], started["phase"]) == ("demo.1", "spec")
-        agent = wf.authenticate(str(started["agent_token"]))
-        assert agent is not None
-        assert (agent.role, agent.run_id) == (Role.AGENT, "demo.1")
-        assert wf.store.worktree("demo.1") == fx.root
+        assert started["worktree"] == str(worktree)
+        assert "agent_token" not in started
+        assert wf.store.worktree("demo.1") == worktree
+        assert all(t.role is not Role.AGENT for t in wf.tokens.list())
 
     fx.run(scenario)
+    assert git(worktree, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
 
 
 def test_worktree_outside_the_roots(fx: Factory, tmp_path: Path) -> None:
