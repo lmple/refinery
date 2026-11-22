@@ -1,1 +1,4 @@
 tools/*.jar
+tools/*.part
+.tlc/
+__pycache__/

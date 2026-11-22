@@ -101,7 +101,14 @@ others go back to the human.
 - Keep specs small and focused: one module per concern (`Run.tla`,
   `Scheduler.tla`, `Locks.tla`, `MergeQueue.tla`, …).
 - Use small constants in `.cfg` files so TLC finishes in seconds; add a larger
-  `*_big.cfg` for occasional deeper checks.
+  `*_big.cfg` for occasional deeper checks (`make tla-big`).
+- Every module has a matching `.cfg`. A module that is only imported by others
+  must instead contain the line `\* refinery: helper`; otherwise `make tla`
+  fails.
+- Terminal states (e.g. a finished or failed run) get an explicit stuttering
+  step, a disjunct of `Next` such as `Done == state \in Terminal /\ UNCHANGED
+  vars`, so TLC's deadlock check stays on and reports only genuine deadlocks.
+- Never use TLC's `-deadlock` flag (it disables deadlock checking).
 - Model the environment explicitly (agent crashes, timeouts, server restarts,
   concurrent runs).
 - Prefer invariants and simple temporal properties; justify any fairness
